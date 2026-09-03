@@ -81,8 +81,8 @@ if [ -f "${SCRIPT_DIR}/bin/agent-harness" ]; then
     cp "${SCRIPT_DIR}/bin/agent-harness" "${INSTALL_DIR}/agent-harness"
 else
     # Remote curl install fallback
-    curl -sL "https://raw.githubusercontent.com/rex/agent-harness/main/bin/agent-harness" -o "${INSTALL_DIR}/agent-harness" || \
-    curl -sL "https://github.com/rex/agent-harness/raw/main/bin/agent-harness" -o "${INSTALL_DIR}/agent-harness"
+    curl -sL "https://raw.githubusercontent.com/ArCzyL/agent-harness/main/bin/agent-harness" -o "${INSTALL_DIR}/agent-harness" || \
+    curl -sL "https://github.com/ArCzyL/agent-harness/raw/main/bin/agent-harness" -o "${INSTALL_DIR}/agent-harness"
 fi
 chmod +x "${INSTALL_DIR}/agent-harness"
 ln -sf "${INSTALL_DIR}/agent-harness" "${INSTALL_DIR}/cbm-init"

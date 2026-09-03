@@ -47,7 +47,7 @@ Every developer pairing with AI coding agents (Cursor, TRAE, Claude Code, Antigr
 Run the universal installer on macOS (Apple Silicon & Intel) or Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rex/agent-harness/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.sh | bash
 ```
 
 ### What the installer does automatically:

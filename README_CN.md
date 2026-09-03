@@ -55,7 +55,7 @@
 在 macOS（Intel / M系列芯片）或 Linux 终端中执行一键安装脚本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rex/agent-harness/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.sh | bash
 ```
 
 ### 安装脚本会自动完成：
