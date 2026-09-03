@@ -13,7 +13,7 @@ import re
 import webbrowser
 import shutil
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 if sys.platform == "win32":
     CBM_BIN = os.path.expanduser("~/.local/bin/codebase-memory-mcp.exe")
@@ -46,21 +46,36 @@ def run_cmd(cmd, check=False):
         raise RuntimeError(res.stderr.strip() or res.stdout.strip())
     return res
 
+def extract_json_payload(output_text):
+    """
+    Robustly extracts a valid JSON root object from output text that may contain
+    arbitrary prefix logs (even logs containing curly brackets like {host})
+    and trailing logs or garbage.
+    """
+    if not output_text:
+        return None
+    decoder = json.JSONDecoder()
+    idx = output_text.find('{')
+    while idx != -1:
+        try:
+            obj, _ = decoder.raw_decode(output_text[idx:])
+            return obj
+        except json.JSONDecodeError:
+            idx = output_text.find('{', idx + 1)
+    return None
+
 def run_cbm_cli(args):
     if not os.path.exists(CBM_BIN):
         return None
     cmd = [CBM_BIN, "cli", "--json"] + args
     res = subprocess.run(cmd, input="{}", capture_output=True, text=True)
-    output = res.stdout
-    json_start = output.find('{')
-    if json_start != -1:
-        try:
-            return json.loads(output[json_start:])
-        except Exception as e:
-            if os.environ.get("DEBUG"):
-                print(f"⚠️ Failed to parse CBM JSON output: {e}", file=sys.stderr)
-    elif res.stderr and os.environ.get("DEBUG"):
-        print(f"⚠️ CBM CLI Error: {res.stderr.strip()}", file=sys.stderr)
+    output = res.stdout or ""
+    parsed = extract_json_payload(output)
+    if parsed is not None:
+        return parsed
+    if (res.stderr or output) and os.environ.get("DEBUG"):
+        err_msg = res.stderr.strip() if res.stderr else output.strip()
+        print(f"⚠️ CBM CLI parse or execution failure: {err_msg}", file=sys.stderr)
     return None
 
 def get_templates_dir():

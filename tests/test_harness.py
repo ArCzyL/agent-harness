@@ -93,6 +93,18 @@ class TestTemplateAndArchitectureParsing(unittest.TestCase):
         self.assertTrue("Rust" in langs or "Python" in langs)
         self.assertIn("main.rs", entries)
 
+    def test_extract_json_payload_with_noisy_logs(self):
+        # Simulates CBM output with fake bracket in log message, valid JSON payload, and trailing log
+        noisy_stdout = """level=info msg="allocator tuning {sqlite,tree_sitter}"
+level=info msg="connecting to {host}:{port} invalid-json"
+{"project": "Users-test-project", "nodes": 127, "edges": 255, "status": "ready"}
+level=info msg="finished in 0.12s"
+"""
+        payload = ah.extract_json_payload(noisy_stdout)
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload.get("project"), "Users-test-project")
+        self.assertEqual(payload.get("nodes"), 127)
+
 class TestInitExecutionAndSafety(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
