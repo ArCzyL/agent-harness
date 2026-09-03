@@ -12,7 +12,7 @@ import subprocess
 import re
 import webbrowser
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 if sys.platform == "win32":
     CBM_BIN = os.path.expanduser("~/.local/bin/codebase-memory-mcp.exe")
@@ -58,6 +58,111 @@ def run_cbm_cli(args):
         except Exception:
             pass
     return None
+
+def get_templates_dir():
+    """Locates templates directory across multiple candidate locations."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(script_dir, "..", "templates"),
+        os.path.join(script_dir, "templates"),
+        os.path.expanduser("~/.local/share/agent-harness/templates")
+    ]
+    for c in candidates:
+        if os.path.isdir(c):
+            return os.path.abspath(c)
+    return None
+
+DEFAULT_KARPATHY_RULES = """## 2. Karpathy 防翻车四大行为准则（The 4 Golden Rules）
+
+### 准则 1：【先想再写 (Think Before Writing)】
+- **把假设说出口**：若需求存在两种或以上的理解，**严禁自行挑选一种闷头写代码**，必须主动向开发者指明歧义并确认；
+- 若开发者提出的方案有明显更简单或更健壮的替代实现，必须主动建议，严禁盲目顺从不合理设计；
+- 严禁在理解不清晰的情况下写出 200 行“错得理直气壮”的废代码。
+
+### 准则 2：【简单优先 (Keep It Simple & Minimal)】
+- **写解决问题所需的最少代码**；
+- 坚决不做投机性功能（Speculative Features），不为仅使用一次的代码做过度抽象与工厂分层，不处理不可能发生的极端场景；
+- **判断标准**：任何资深工程师会评价为“搞复杂了”的代码，一律删除或简化。
+
+### 准则 3：【手术式修改 (Surgical Edits)】
+- **只动任务要求碰的代码**；
+- 严禁“顺手优化”隔壁无关的代码，严禁重新格式化或重构原本能正常运行的无关文件；
+- 严格遵循项目中已有的编码风格与缩进规范，将 Git Diff 控制在最小可审计范围（严禁将 3 行修复变成 500 行的庞大 Diff）。
+
+### 准则 4：【目标驱动与自检验收 (Goal-Driven Execution)】
+- 将每个开发/修复任务转化为**客观可验证的目标**：
+  - “修复 Bug” $\\to$ 先构造一个能稳定复现该 Bug 的最小测试，修改代码，直到测试由红变绿；
+  - “添加功能” $\\to$ 必须配套对应的测试用例与调用校验。
+- 严禁空口回答“我修好了”，交付前必须在终端实际运行测试验证。"""
+
+def load_karpathy_rules():
+    """Loads Karpathy rules dynamically from template file with embedded fallback."""
+    td = get_templates_dir()
+    if td:
+        tpath = os.path.join(td, "karpathy_rules.md")
+        if os.path.isfile(tpath):
+            try:
+                with open(tpath, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    if content:
+                        return content
+            except Exception:
+                pass
+    return DEFAULT_KARPATHY_RULES
+
+def parse_architecture(arch_res, target_dir):
+    """Extracts languages and entry points from get_architecture output with directory fallback."""
+    languages_str = ""
+    entry_points = []
+
+    if isinstance(arch_res, dict):
+        text = arch_res.get("content", [{}])[0].get("text", "")
+        # Method 1: parse table block
+        lang_match = re.search(r"languages:[^\n]*\n((?:\s+[A-Za-z0-9#\+\.\-_]+\s+\d+\n)+)", text, re.IGNORECASE)
+        if lang_match:
+            languages_str = ", ".join([l.strip().split()[0] for l in lang_match.group(1).strip().split("\n") if l.strip()])
+        
+        entry_match = re.search(r"entry_points:[^\n]*\n((?:\s+\S+\s+\S+\n)+)", text, re.IGNORECASE)
+        if entry_match:
+            for line in entry_match.group(1).strip().split("\n"):
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    entry_points.append(parts[1])
+
+    # Method 2: Fast directory extension fallback if graph returned no explicit language table
+    if not languages_str:
+        ext_counts = {}
+        ext_map = {
+            ".go": "Go", ".rs": "Rust", ".py": "Python", ".ts": "TypeScript",
+            ".js": "JavaScript", ".java": "Java", ".c": "C", ".cpp": "C++",
+            ".rb": "Ruby", ".php": "PHP", ".swift": "Swift", ".kt": "Kotlin"
+        }
+        for root, dirs, files in os.walk(target_dir):
+            if any(p in root for p in [".git", "node_modules", "target", "vendor", ".venv"]):
+                continue
+            for f in files:
+                ext = os.path.splitext(f)[1].lower()
+                if ext in ext_map:
+                    lang = ext_map[ext]
+                    ext_counts[lang] = ext_counts.get(lang, 0) + 1
+        if ext_counts:
+            sorted_langs = sorted(ext_counts.items(), key=lambda x: x[1], reverse=True)
+            languages_str = ", ".join([l[0] for l in sorted_langs[:5]])
+
+    if not languages_str:
+        languages_str = "自动检测 / 多语言"
+
+    # Fast entry points fallback if none discovered
+    if not entry_points:
+        common_entries = [
+            "main.rs", "src/main.rs", "main.go", "cmd/main.go",
+            "src/index.ts", "src/index.js", "app.py", "main.py", "src/main.py"
+        ]
+        for ce in common_entries:
+            if os.path.isfile(os.path.join(target_dir, ce)):
+                entry_points.append(ce)
+
+    return languages_str, entry_points
 
 def detect_test_harness(project_dir):
     """Detects test commands and build tools based on files in project_dir."""
@@ -116,28 +221,13 @@ def cmd_init(target_dir):
     else:
         # Step 2: Query architecture
         print("🔍 Inspecting codebase architecture & language breakdown...")
-        languages_str = ""
-        entry_points = []
-        
+        arch_res = None
         if cbm_project_id:
             arch_res = run_cbm_cli(["get_architecture", "--project", cbm_project_id])
-            if isinstance(arch_res, dict):
-                text = arch_res.get("content", [{}])[0].get("text", "")
-                lang_match = re.search(r"languages:\s*\d+\s*\(cols:\s*language files\)\s*\n((?:\s+[A-Za-z0-9#\+\.\-_]+\s+\d+\n)+)", text)
-                if lang_match:
-                    languages_str = ", ".join([l.strip().split()[0] for l in lang_match.group(1).strip().split("\n")])
-                
-                entry_match = re.search(r"entry_points:\s*\d+\s*\(cols:\s*qn file\)\s*\n((?:\s+\S+\s+\S+\n)+)", text)
-                if entry_match:
-                    for line in entry_match.group(1).strip().split("\n"):
-                        parts = line.strip().split()
-                        if len(parts) >= 2:
-                            entry_points.append(parts[1])
 
-        if not languages_str:
-            languages_str = "自动检测 / 多语言"
-
+        languages_str, entry_points = parse_architecture(arch_res, target_dir)
         harness_md = detect_test_harness(target_dir)
+        karpathy_rules_md = load_karpathy_rules()
         entry_points_md = "\n".join([f"- `{ep}`" for ep in entry_points[:10]]) if entry_points else "- 暂无显式 main 入口（待开发定义）"
 
         print("📝 Synthesizing tailor-made AGENTS.md (Karpathy Rules + Test Harness)...")
@@ -158,35 +248,14 @@ def cmd_init(target_dir):
 
 ---
 
-## 2. Karpathy 防翻车四大行为准则（The 4 Golden Rules）
-
-### 准则 1：【先想再写 (Think Before Writing)】
-- **把假设说出口**：若需求存在两种或以上的理解，**严禁自行挑选一种闷头写代码**，必须主动向开发者指明歧义并确认；
-- 若开发者提出的方案有明显更简单或更健壮的替代实现，必须主动建议，严禁盲目顺从不合理设计；
-- 严禁在理解不清晰的情况下写出 200 行“错得理直气壮”的废代码。
-
-### 准则 2：【简单优先 (Keep It Simple & Minimal)】
-- **写解决问题所需的最少代码**；
-- 坚决不做投机性功能（Speculative Features），不为仅使用一次的代码做过度抽象与工厂分层，不处理不可能发生的极端场景；
-- **判断标准**：任何资深工程师会评价为“搞复杂了”的代码，一律删除或简化。
-
-### 准则 3：【手术式修改 (Surgical Edits)】
-- **只动任务要求碰的代码**；
-- 严禁“顺手优化”隔壁无关的代码，严禁重新格式化或重构原本能正常运行的无关文件；
-- 严格遵循项目中已有的编码风格与缩进规范，将 Git Diff 控制在最小可审计范围（严禁将 3 行修复变成 500 行的庞大 Diff）。
-
-### 准则 4：【目标驱动与自检验收 (Goal-Driven Execution)】
-- 将每个开发/修复任务转化为**客观可验证的目标**：
-  - “修复 Bug” $\to$ 先构造一个能稳定复现该 Bug 的最小测试，修改代码，直到测试由红变绿；
-  - “添加功能” $\to$ 必须配套对应的测试用例与调用校验。
-- 严禁空口回答“我修好了”，交付前必须在终端实际运行测试验证。
+{karpathy_rules_md}
 
 ---
 
 ## 3. 测试框架（Test Harness）与执行闭环
 
 > **物理围栏机制**：智能体改动代码后，必须调用终端命令自我闭环：
-> `编写/修改代码` $\to$ `运行检查命令` $\to$ `根据报错自愈修复` $\to$ `重新运行测试` $\to$ `全部绿灯后交付`。
+> `编写/修改代码` $\\to$ `运行检查命令` $\\to$ `根据报错自愈修复` $\\to$ `重新运行测试` $\\to$ `全部绿灯后交付`。
 
 ### 本项目测试与校验命令：
 {harness_md}

@@ -87,6 +87,15 @@ fi
 chmod +x "${INSTALL_DIR}/agent-harness"
 ln -sf "${INSTALL_DIR}/agent-harness" "${INSTALL_DIR}/cbm-init"
 
+# 3.1 Install templates
+SHARE_DIR="${HOME}/.local/share/agent-harness/templates"
+mkdir -p "${SHARE_DIR}"
+if [ -d "${SCRIPT_DIR}/templates" ]; then
+    cp -r "${SCRIPT_DIR}/templates/"* "${SHARE_DIR}/" 2>/dev/null || true
+else
+    curl -sL "https://raw.githubusercontent.com/ArCzyL/agent-harness/main/templates/karpathy_rules.md" -o "${SHARE_DIR}/karpathy_rules.md" 2>/dev/null || true
+fi
+
 # 4. Ensure ~/.local/bin in PATH
 SHELL_RC=""
 if [ -n "${ZSH_VERSION}" ] || [ -n "${ZSH_NAME}" ] || [ -f "${HOME}/.zshrc" ]; then

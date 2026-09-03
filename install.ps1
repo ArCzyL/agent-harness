@@ -65,6 +65,14 @@ Set-Content -Path $CliCmd -Value $CmdContent -Encoding ASCII
 $InitCmdContent = "@echo off`r`npython `"%~dp0agent-harness`" init %*`r`n"
 Set-Content -Path $CbmInitCmd -Value $InitCmdContent -Encoding ASCII
 
+# 3.1 Install templates
+$ShareDir = "$HOME\.local\share\agent-harness\templates"
+if (-not (Test-Path $ShareDir)) {
+    New-Item -ItemType Directory -Path $ShareDir -Force | Out-Null
+}
+$RawTmplUrl = "https://raw.githubusercontent.com/ArCzyL/agent-harness/main/templates/karpathy_rules.md"
+Invoke-WebRequest -Uri $RawTmplUrl -OutFile "$ShareDir\karpathy_rules.md" -UseBasicParsing -ErrorAction SilentlyContinue
+
 # 4. Add ~/.local/bin to User PATH
 $UserPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
 if ($UserPath -notlike "*$InstallDir*") {
