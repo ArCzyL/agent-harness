@@ -7,10 +7,10 @@
 **Stop AI Agents from Burning 99% of Your Tokens and Writing Untested Slop.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-brightgreen.svg)](#installation)
-[![Compatible With](https://img.shields.io/badge/Compatible%20With-TRAE%20%7C%20Cursor%20%7C%20Claude%20Code%20%7C%20Antigravity%20%7C%20Windsurf%20%7C%20Zed-orange.svg)](#supported-ai-tools)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-brightgreen.svg)](#-installation-30-seconds)
+[![Compatible With](https://img.shields.io/badge/Compatible%20With-TRAE%20%7C%20Cursor%20%7C%20Claude%20Code%20%7C%20Antigravity%20%7C%20Windsurf%20%7C%20Zed-orange.svg)](#-supported-ai-environments)
 
-[中文文档 (Chinese)](README_CN.md) • [Features](#features) • [Quick Start](#quick-start) • [How It Works](#how-it-works) • [Comparison](#comparison)
+[中文文档 (Chinese)](README_CN.md) • [Features](#-key-features) • [Installation](#-installation-30-seconds) • [How It Works](#-quick-start-for-any-new-or-existing-project) • [Comparison](#-comparison) • [Acknowledgements](#-acknowledgements)
 
 </div>
 
@@ -20,25 +20,29 @@
 
 Every developer pairing with AI coding agents (Cursor, TRAE, Claude Code, Antigravity, Windsurf) faces the exact same two fatal bottlenecks:
 
-1. **Context Amnesia & Token Burn**: The agent has zero cross-session memory. Every new window begins by blindly running full-text `grep` across hundreds of files, consuming **400,000+ tokens (~$1.50–$6.00)** just to understand basic architecture.
+1. **Context Amnesia & Token Burn**: The agent has zero cross-session memory. Every new window begins by blindly running full-text `grep` across hundreds of files, consuming **hundreds of thousands of tokens** just to understand basic architecture.
 2. **Cognitive Drift & Untested AI Slop**: Without strict behavioral guardrails, agents make confident wrong assumptions, overcomplicate scripts with 5 layers of premature abstractions, silently reformat working code into 600-line unreviewable diffs, and say *"I'm done!"* without running a single automated test.
 
-**`agent-harness` solves both problems permanently in a single, tool-agnostic package.**
+**`agent-harness` solves both problems permanently in a single, lightweight, tool-agnostic package.**
 
 ---
 
 ## 🚀 Key Features
 
-* 🧠 **Persistent Codebase Knowledge Graph**: Powered by a high-performance, single-binary C engine (`codebase-memory-mcp`). Indexes ASTs, call graphs, routes, and type hierarchies into a local SQLite database. **Sub-millisecond queries, reducing structural exploration tokens by 99.2%**.
+* 🧠 **Persistent Codebase Knowledge Graph**:
+  Powered by the open-source **[DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)** (kudos to the author and community). Uses a high-performance, single-binary C daemon to index ASTs, call graphs, routes, and type hierarchies into a local SQLite database. **Sub-millisecond queries, reducing structural exploration tokens by over 99%**.
 * 🥋 **Karpathy's 4 Golden Behavioral Rules**:
   * **Think Before Writing**: Explicitly state assumptions; never silently pick an arbitrary interpretation when requirements are ambiguous.
   * **Simplicity First**: Write the minimum code necessary. No speculative features, no premature factory abstractions.
   * **Surgical Edits**: Touch only what the task requires. Never "clean up" working neighboring files; keep Git Diffs minimal and auditable.
   * **Goal-Driven Execution**: Convert every task into verifiable criteria. Write tests first, verify in terminal before delivery.
-* 🔒 **Physical Test Harness (The Execution Loop)**: Auto-detects your project's technology stack (Go, Rust, TypeScript, Python, etc.) and binds terminal test/lint commands. Forces the agent into an autonomous self-healing loop:  
+* 🔒 **Physical Test Harness (The Execution Loop)**:
+  Auto-detects your project's technology stack (Go, Rust, TypeScript, Python, etc., including Monorepos) and binds terminal test/lint commands. Forces the agent into an autonomous self-healing loop:  
   $$\text{Code} \longrightarrow \text{Run Test} \longrightarrow \text{Auto-Fix Errors} \longrightarrow \text{All Green} \longrightarrow \text{Deliver}$$
-* 🌐 **100% IDE & Client Agnostic**: Automatically configures and syncs across **TRAE, Cursor, Claude Code, Antigravity, Windsurf, Zed, and VS Code**. Single source of truth via universal `AGENTS.md`.
-* 🛡️ **Zero-Cloud Leakage**: 100% local execution. Automatically configures global and project-level `.gitignore` to prevent any local database or graph artifacts from polluting private GitHub repos.
+* 🌐 **100% IDE & Client Agnostic**:
+  Automatically configures and syncs across **TRAE, Cursor, Claude Code, Antigravity, Windsurf, Zed, and VS Code**. Single source of truth via universal `AGENTS.md`, complemented by automated compatibility symlinks (`CLAUDE.md`, `GEMINI.md`, `.cursorrules`).
+* 🛡️ **Zero-Cloud Leakage**:
+  100% local execution. Automatically configures global and project-level `.gitignore` to prevent any local database or graph artifacts from polluting private GitHub repos.
 
 ---
 
@@ -57,7 +61,7 @@ irm https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.ps1 | ie
 
 ### What the installer does automatically:
 1. Downloads and activates the ultra-fast `codebase-memory-mcp` daemon.
-2. Scans your machine for installed AI editors (TRAE, Cursor, Claude Code, Antigravity, Windsurf) and configures their global MCP settings.
+2. Scans your machine for installed AI editors (TRAE, Cursor, Claude Code, Antigravity, Windsurf) and configures their global MCP settings (with automated `.bak` backups on corrupted files).
 3. Configures global Git protection (`~/.gitignore_global`) to safeguard private repos.
 4. Installs the `agent-harness` CLI into `~/.local/bin/`.
 
@@ -78,7 +82,7 @@ Open **TRAE**, **Cursor**, **Claude Code**, or **Antigravity** in that project a
 
 ### What happens:
 1. **Zero Overwrite Safety**: If you already have hand-crafted rules in `AGENTS.md`, it **never** overwrites them.
-2. **AST Architectural Scan**: Parses languages, modules, and entry points into the local knowledge graph.
+2. **AST Architectural Scan**: Parses languages, modules, and entry points into the local knowledge graph (with directory-level fallback).
 3. **Tailor-Made `AGENTS.md`**: Generates a project-specific specification with your stack's exact test harness and Karpathy rules.
 4. **Universal Symlink Sync**: Creates compatibility pointers (`CLAUDE.md`, `GEMINI.md`, `.cursorrules`) linking to `AGENTS.md`.
 
@@ -88,7 +92,7 @@ Open **TRAE**, **Cursor**, **Claude Code**, or **Antigravity** in that project a
 
 | Metric / Feature | Traditional Agent (Raw Grep) | With `agent-harness` |
 | :--- | :---: | :---: |
-| **5 Architectural Queries** | ~412,000 Tokens | **~3,400 Tokens (-99.2%)** |
+| **Architectural Exploration Tokens** | Hundreds of thousands of Tokens wasted | **Only a few thousand Tokens (-99%+)** |
 | **Query Latency** | 3 - 8 seconds | **< 1 millisecond** |
 | **Over-Engineering & Code Drift** | Frequent (unwanted abstractions) | **Blocked by Karpathy Rule 2** |
 | **Silent Breakage on Delivery** | Common (untested code) | **Blocked by Automated Test Harness** |
@@ -106,7 +110,7 @@ Open **TRAE**, **Cursor**, **Claude Code**, or **Antigravity** in that project a
 | **Cursor** | `~/.cursor/mcp.json` | `.cursorrules` / `.cursor/rules/` symlink |
 | **Claude Code** | `~/.claude.json` | `CLAUDE.md` symlink |
 | **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | `AGENTS.md` integration |
-| **Zed / OpenCode** | Standard JSON configuration | Native `AGENTS.md` support |
+| **Zed / VS Code** | Standard JSON configuration | Native `AGENTS.md` support |
 
 ---
 
@@ -121,6 +125,15 @@ Or open **`http://localhost:9749`** in your browser.
 
 ---
 
+## 💖 Acknowledgements
+
+`agent-harness` stands on the shoulders of giants. We gratefully acknowledge:
+- **[DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)**: For the high-performance C language AST knowledge graph engine and 3D visualizer (please consider starring their repository! ⭐️);
+- **Andrej Karpathy**: For articulating the 4 fundamental engineering disciplines for AI-assisted programming;
+- **Agentic AI Foundation (Linux Foundation)**: For standardizing the cross-tool `AGENTS.md` specification.
+
+---
+
 ## 📄 License
 
-Distributed under the **MIT License**. See [LICENSE](LICENSE) for more information.
+Distributed under the **[MIT License](LICENSE)**.

@@ -59,6 +59,7 @@ The framework consists of three tightly coupled, lightweight layers:
    - Cursor (`~/.cursor/mcp.json`)
    - Claude Code (`~/.claude.json`)
    - Antigravity / Gemini CLI (`~/.gemini/config/mcp_config.json`)
+   - Windsurf (`~/.codeium/windsurf/mcp_config.json`)
 2. Injects or merges `codebase-memory-mcp` definition safely into each client's `mcpServers` section without overwriting other tools.
 3. Configures global Git excludes (`~/.gitignore_global`) via `git config --global core.excludesfile`.
 
@@ -69,6 +70,6 @@ The framework consists of three tightly coupled, lightweight layers:
 | Decision | Selected Approach | Rationale |
 | :--- | :--- | :--- |
 | **Runtime Language** | Python 3 Standard Library only | Zero external dependencies (`pip`/`npm`), runs out of the box on macOS, Linux, and Windows. |
-| **Memory Engine** | `codebase-memory-mcp` (C / SQLite) | Single 15MB binary, sub-millisecond AST queries, 99.2% token reduction, minimal RAM footprint (<30MB). |
+| **Memory Engine** | [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) (C / SQLite) | Single 15MB binary, sub-millisecond AST queries, 99%+ token reduction, minimal RAM footprint (<30MB). |
 | **Specification Source of Truth** | Universal `AGENTS.md` | Adopted by the Agentic AI Foundation / Linux Foundation; supported natively by modern IDEs, backward-compatible via symlinks. |
 | **Verification Loop** | Test Harness Command Invariant | Human developers cannot act as real-time code checkers; the compiler/test runner is the only objective gatekeeper. |
