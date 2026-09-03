@@ -141,7 +141,7 @@ Or open **`http://localhost:9749`** in your browser.
 * 🏗️ **Primary Architect & Engineer**: **Google Gemini (Antigravity Agent)** designed the high-concurrency streaming parser, cross-platform architecture, and autonomous self-healing test loop;
 * 🔬 **Adversarial Code Reviewer**: **Zhipu GLM-5.3 (TRAE)** executed 5 rounds of rigorous white-box auditing, surfacing edge-case bugs in test isolation, monorepo heuristics, and corrupted config recovery;
 * 🧠 **Deep Reasoning & Graph Auditor**: **DeepSeek V4 PRO (Max Thinking)** inspected the complete AST graph and independently executed the test harness, confirming 13/13 passing tests (100% green);
-* ⚖️ **Philosophical & Security Auditor**: **Anthropic Claude 3.7 Sonnet (Thinking)** performed a full audit of the 485-line codebase, validating the determinism of execution exit codes versus prompt instructions and verifying zero-dependency supply-chain safety;
+* ⚖️ **Philosophical & Security Auditor**: **Anthropic Claude Sonnet 5 (Thinking)** performed a full audit of the 485-line codebase, validating the determinism of execution exit codes versus prompt instructions and verifying zero-dependency supply-chain safety;
 * 👨‍✈️ **Human Orchestrator & Principal**: **[@ArCzyL](https://github.com/ArCzyL)** directed architecture, prioritized trade-offs, and arbitrated the adversarial debate.
 
 ---

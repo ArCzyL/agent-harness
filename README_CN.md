@@ -145,7 +145,7 @@ agent-harness ui
 * 🏗️ **核心架构与系统实装 (Primary Architect & Engineer)**：**Google Gemini (Antigravity Agent)** 负责高并发流式解析设计、跨平台实现与多轮测试自愈重构；
 * 🔬 **白盒审计与对抗挑刺 (Adversarial Code Reviewer)**：**智谱 GLM-5.3 (TRAE)** 进行了 5 轮尖锐的代码审计，逼出并修复了包括单测隔离、Monorepo 嗅探与坏配置保护等深层隐患；
 * 🧠 **深度逻辑推理与图谱验证 (Deep Reasoning & Graph Auditor)**：**DeepSeek V4 PRO (Max Thinking)** 全量通读 AST 知识图谱并实跑单测套件，验证了 13/13 项测试 100% 绿灯与架构自洽性；
-* ⚖️ **形式化语义与安全辩论 (Philosophical & Security Auditor)**：**Anthropic Claude 3.7 Sonnet (Thinking)** 深度通读 485 行完整源码，对“物理围栏机制”与“退出码信号确定性”进行了极高密度的学术级论证，验证了纯标准库实现的安全与透明；
+* ⚖️ **形式化语义与安全辩论 (Philosophical & Security Auditor)**：**Anthropic Claude Sonnet 5 (Thinking)** 深度通读 485 行完整源码，对“物理围栏机制”与“退出码信号确定性”进行了极高密度的学术级论证，验证了纯标准库实现的安全与透明；
 * 👨‍✈️ **人类总指挥与最终裁决者 (Human Orchestrator & Principal)**：**[@ArCzyL](https://github.com/ArCzyL)** 担任系统架构把控与多模型博弈仲裁。
 
 ---
