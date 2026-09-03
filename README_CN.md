@@ -7,7 +7,7 @@
 **杜绝 AI 每次对话盲目烧掉 99% 的 Token，终结写出未测试垃圾代码与过度设计的恶习。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-brightgreen.svg)](#安装指南)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-brightgreen.svg)](#安装指南)
 [![Compatible With](https://img.shields.io/badge/Compatible%20With-TRAE%20%7C%20Cursor%20%7C%20Claude%20Code%20%7C%20Antigravity%20%7C%20Windsurf%20%7C%20Zed-orange.svg)](#多工具生态全兼容)
 
 [English Documentation](README.md) • [核心特性](#-核心特性) • [极速安装](#-极速安装30秒) • [工作原理](#-工作原理) • [效益对比](#-实测效益对比)
@@ -52,10 +52,15 @@
 
 ## 📦 极速安装（30 秒搞定）
 
-在 macOS（Intel / M系列芯片）或 Linux 终端中执行一键安装脚本：
-
+### macOS / Linux
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.sh | bash
+```
+
+### Windows (PowerShell)
+在 PowerShell 中运行（管理员或普通终端均可）：
+```powershell
+irm https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.ps1 | iex
 ```
 
 ### 安装脚本会自动完成：

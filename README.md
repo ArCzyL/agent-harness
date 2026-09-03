@@ -7,7 +7,7 @@
 **Stop AI Agents from Burning 99% of Your Tokens and Writing Untested Slop.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-brightgreen.svg)](#installation)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-brightgreen.svg)](#installation)
 [![Compatible With](https://img.shields.io/badge/Compatible%20With-TRAE%20%7C%20Cursor%20%7C%20Claude%20Code%20%7C%20Antigravity%20%7C%20Windsurf%20%7C%20Zed-orange.svg)](#supported-ai-tools)
 
 [中文文档 (Chinese)](README_CN.md) • [Features](#features) • [Quick Start](#quick-start) • [How It Works](#how-it-works) • [Comparison](#comparison)
@@ -44,10 +44,15 @@ Every developer pairing with AI coding agents (Cursor, TRAE, Claude Code, Antigr
 
 ## 📦 Installation (30 Seconds)
 
-Run the universal installer on macOS (Apple Silicon & Intel) or Linux:
-
+### macOS / Linux
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.sh | bash
+```
+
+### Windows (PowerShell)
+Run PowerShell as Administrator or regular user:
+```powershell
+irm https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.ps1 | iex
 ```
 
 ### What the installer does automatically:
