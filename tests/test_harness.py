@@ -120,8 +120,12 @@ level=info msg="finished in 0.12s"
 class TestInitExecutionAndSafety(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
+        # Stub run_cbm_cli so unit tests are isolated and never register temp test dirs into CBM daemon
+        self.orig_run_cbm_cli = ah.run_cbm_cli
+        ah.run_cbm_cli = lambda args: {"project": "mock-test-project", "nodes": 0, "edges": 0}
 
     def tearDown(self):
+        ah.run_cbm_cli = self.orig_run_cbm_cli
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_zero_overwrite_protection(self):
