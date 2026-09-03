@@ -1,0 +1,9 @@
+.DS_Store
+*.log
+.codebase-memory/
+*.graph.db*
+*.db.zst
+__pycache__/
+*.pyc
+tmp/
+scratch/

@@ -1,0 +1,366 @@
+#!/usr/bin/env python3
+"""
+agent-harness CLI
+Universal AI Agent Anti-Drift Framework & Knowledge Graph Harness
+Works with TRAE, Cursor, Claude Code, Antigravity, Windsurf, Zed, and VS Code.
+"""
+
+import os
+import sys
+import json
+import subprocess
+import re
+import webbrowser
+
+VERSION = "1.0.0"
+
+CBM_BIN = os.path.expanduser("~/.local/bin/codebase-memory-mcp")
+
+BANNER = r"""
+   ___                    __     __ __                                 
+  / _ | ___ ____ ___  __ / /_   / // /___ _ ____ ___  ___  ___ ___    
+ / __ |/ _ `/ -_) _ \/ // / -_) / _  // _ `// __// _ \/ -_)(_-<(_-<   
+/_/ |_|\_, /\__/_//_/\_,_/\__/ /_//_/ \_,_//_/  /_//_/\__//___/___/   
+      /___/                                                            
+       Universal Anti-Drift & Codebase Memory Harness for AI Agents
+"""
+
+def print_help():
+    print(BANNER)
+    print(f"Version: {VERSION}\n")
+    print("Usage:")
+    print("  agent-harness init [path]    Index codebase & bootstrap tailor-made AGENTS.md")
+    print("  agent-harness setup          Auto-configure MCP & rules across all installed AI IDEs")
+    print("  agent-harness status         Show codebase memory daemon & indexed projects status")
+    print("  agent-harness ui             Open the 3D Knowledge Graph UI in browser (localhost:9749)")
+    print("  agent-harness version        Print version")
+    print("  agent-harness --help         Show this help message\n")
+
+def run_cmd(cmd, check=False):
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if check and res.returncode != 0:
+        raise RuntimeError(res.stderr.strip() or res.stdout.strip())
+    return res
+
+def run_cbm_cli(args):
+    if not os.path.exists(CBM_BIN):
+        return None
+    cmd = [CBM_BIN, "cli", "--json"] + args
+    res = subprocess.run(cmd, input="{}", capture_output=True, text=True)
+    output = res.stdout
+    json_start = output.find('{')
+    if json_start != -1:
+        try:
+            return json.loads(output[json_start:])
+        except Exception:
+            pass
+    return None
+
+def detect_test_harness(project_dir):
+    """Detects test commands and build tools based on files in project_dir."""
+    harness = []
+    
+    if os.path.exists(os.path.join(project_dir, "Cargo.toml")):
+        harness.append("- **代码编译检查**：`cargo check`")
+        harness.append("- **单元与集成测试**：`cargo test`")
+        harness.append("- **代码质量与严谨检查 (Clippy)**：`cargo clippy --all-targets -- -D warnings`")
+    elif os.path.exists(os.path.join(project_dir, "go.mod")):
+        harness.append("- **代码编译检查**：`go build ./...`")
+        harness.append("- **单元测试验证**：`go test -v ./...`")
+        harness.append("- **静态代码检查 (Vet)**：`go vet ./...`")
+    elif os.path.exists(os.path.join(project_dir, "package.json")):
+        harness.append("- **类型与构建检查**：`npx tsc --noEmit` (或 `npm run build`)")
+        harness.append("- **单元测试验证**：`npm test` (或 `pnpm test` / `bun test`)")
+        harness.append("- **代码风格检查 (Lint)**：`npm run lint`")
+    elif os.path.exists(os.path.join(project_dir, "pyproject.toml")) or os.path.exists(os.path.join(project_dir, "requirements.txt")):
+        harness.append("- **单元测试验证**：`pytest`")
+        harness.append("- **类型检查**：`mypy .`")
+        harness.append("- **代码质量检查 (Lint)**：`ruff check .`")
+    else:
+        harness.append("- **测试验证**：`# 请在此填入该技术栈的单元测试命令（如 pytest / go test / npm test）`")
+        harness.append("- **构建检查**：`# 请在此填入该技术栈的构建/语法检查命令`")
+
+    return "\n".join(harness)
+
+def cmd_init(target_dir):
+    target_dir = os.path.abspath(target_dir)
+    if not os.path.isdir(target_dir):
+        print(f"❌ Error: {target_dir} is not a valid directory.")
+        sys.exit(1)
+
+    agents_path = os.path.join(target_dir, "AGENTS.md")
+    project_name = os.path.basename(target_dir)
+
+    print(f"\n🚀 [agent-harness] Initializing project: {project_name}")
+    print(f"📁 Target path: {target_dir}")
+
+    # Step 1: Index repository
+    print("⏳ Building / updating codebase knowledge graph via codebase-memory-mcp...")
+    idx_res = run_cbm_cli(["index_repository", "--repo-path", target_dir])
+    cbm_project_id = ""
+    if isinstance(idx_res, dict):
+        cbm_project_id = idx_res.get("project", "")
+        nodes = idx_res.get("nodes", 0)
+        edges = idx_res.get("edges", 0)
+        print(f"✅ Graph indexed: {nodes} nodes, {edges} edges.")
+    else:
+        print("ℹ️ Graph index completed.")
+
+    # Check if AGENTS.md already exists
+    if os.path.exists(agents_path):
+        print(f"🛡️  AGENTS.md already exists at: {agents_path}")
+        print("⏭️  Skipping creation to protect existing rules from being overwritten.")
+    else:
+        # Step 2: Query architecture
+        print("🔍 Inspecting codebase architecture & language breakdown...")
+        languages_str = ""
+        entry_points = []
+        
+        if cbm_project_id:
+            arch_res = run_cbm_cli(["get_architecture", "--project", cbm_project_id])
+            if isinstance(arch_res, dict):
+                text = arch_res.get("content", [{}])[0].get("text", "")
+                lang_match = re.search(r"languages:\s*\d+\s*\(cols:\s*language files\)\s*\n((?:\s+[A-Za-z0-9#\+\.\-_]+\s+\d+\n)+)", text)
+                if lang_match:
+                    languages_str = ", ".join([l.strip().split()[0] for l in lang_match.group(1).strip().split("\n")])
+                
+                entry_match = re.search(r"entry_points:\s*\d+\s*\(cols:\s*qn file\)\s*\n((?:\s+\S+\s+\S+\n)+)", text)
+                if entry_match:
+                    for line in entry_match.group(1).strip().split("\n"):
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            entry_points.append(parts[1])
+
+        if not languages_str:
+            languages_str = "自动检测 / 多语言"
+
+        harness_md = detect_test_harness(target_dir)
+        entry_points_md = "\n".join([f"- `{ep}`" for ep in entry_points[:10]]) if entry_points else "- 暂无显式 main 入口（待开发定义）"
+
+        print("📝 Synthesizing tailor-made AGENTS.md (Karpathy Rules + Test Harness)...")
+        content = f"""# {project_name} AI 智能体开发规范与项目指令 (AGENTS.md)
+
+欢迎来到 **{project_name}** 项目！本项目由独立全栈开发者维护。AI 智能体在进行开发与修改时，必须将本文件视为**最高工程铁律**。
+
+> **【AI 开发纪律 · 动手前必读】**
+> 在编写或修改任何代码之前，必须通读本规范。模型不具备跨会话持久记忆，本文件是约束代码质量的物理围栏。**严禁凭直觉猜测需求，严禁无测试直接交付。**
+
+---
+
+## 1. 核心技术栈与架构基线
+- **项目名称**：`{project_name}`
+- **主要技术栈 / 语言**：{languages_str}
+- **核心入口点 (Entry Points)**：
+{entry_points_md}
+
+---
+
+## 2. Karpathy 防翻车四大行为准则（The 4 Golden Rules）
+
+### 准则 1：【先想再写 (Think Before Writing)】
+- **把假设说出口**：若需求存在两种或以上的理解，**严禁自行挑选一种闷头写代码**，必须主动向开发者指明歧义并确认；
+- 若开发者提出的方案有明显更简单或更健壮的替代实现，必须主动建议，严禁盲目顺从不合理设计；
+- 严禁在理解不清晰的情况下写出 200 行“错得理直气壮”的废代码。
+
+### 准则 2：【简单优先 (Keep It Simple & Minimal)】
+- **写解决问题所需的最少代码**；
+- 坚决不做投机性功能（Speculative Features），不为仅使用一次的代码做过度抽象与工厂分层，不处理不可能发生的极端场景；
+- **判断标准**：任何资深工程师会评价为“搞复杂了”的代码，一律删除或简化。
+
+### 准则 3：【手术式修改 (Surgical Edits)】
+- **只动任务要求碰的代码**；
+- 严禁“顺手优化”隔壁无关的代码，严禁重新格式化或重构原本能正常运行的无关文件；
+- 严格遵循项目中已有的编码风格与缩进规范，将 Git Diff 控制在最小可审计范围（严禁将 3 行修复变成 500 行的庞大 Diff）。
+
+### 准则 4：【目标驱动与自检验收 (Goal-Driven Execution)】
+- 将每个开发/修复任务转化为**客观可验证的目标**：
+  - “修复 Bug” $\to$ 先构造一个能稳定复现该 Bug 的最小测试，修改代码，直到测试由红变绿；
+  - “添加功能” $\to$ 必须配套对应的测试用例与调用校验。
+- 严禁空口回答“我修好了”，交付前必须在终端实际运行测试验证。
+
+---
+
+## 3. 测试框架（Test Harness）与执行闭环
+
+> **物理围栏机制**：智能体改动代码后，必须调用终端命令自我闭环：
+> `编写/修改代码` $\to$ `运行检查命令` $\to$ `根据报错自愈修复` $\to$ `重新运行测试` $\to$ `全部绿灯后交付`。
+
+### 本项目测试与校验命令：
+{harness_md}
+
+**闭环铁律**：
+1. 若测试或编译报错，智能体必须读取具体报错栈并自行修复，严禁在未通过测试时宣告任务完成；
+2. 若连续修复 3 次仍无法解决底层依赖或设计阻塞，必须**主动停下来汇报具体卡点**，严禁进入无限盲目试错死循环。
+
+---
+
+## 4. 代码知识图谱检索纪律 (Codebase Memory)
+- 探索系统架构、函数定义、依赖链路或接口路由时：
+  - **严禁直接全文盲目 grep 或递归遍历大文件**；
+  - **必须优先调用 `codebase-memory-mcp` 图谱工具**：
+    - `get_architecture`: 快速获取系统整体拓扑、热点与分层；
+    - `search_graph`: 精准查找函数、类、结构体、接口定义；
+    - `trace_path`: 追踪上下游完整调用链，评估修改带来的“爆炸半径”；
+    - `get_code_snippet`: 精确读取目标源码，避免上下文爆炸。
+
+---
+
+## 5. 业务专属红线与约束（待补充）
+- *[开发者自定义区域]*：可在此处记录当前项目的特定业务逻辑、私密环境配置或核心数据模型。
+"""
+        with open(agents_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"✨ Successfully created: {agents_path}")
+
+    # Step 3: Create compatibility symlinks (for Claude Code, Gemini, Cursor)
+    print("🔗 Ensuring cross-IDE compatibility symlinks...")
+    for alias in ["CLAUDE.md", "GEMINI.md", ".cursorrules"]:
+        alias_path = os.path.join(target_dir, alias)
+        if not os.path.exists(alias_path):
+            try:
+                os.symlink("AGENTS.md", alias_path)
+                print(f"  + Created symlink: {alias} -> AGENTS.md")
+            except Exception:
+                pass
+
+    # Step 4: Ensure gitignore safety
+    git_ignore_path = os.path.join(target_dir, ".gitignore")
+    if os.path.exists(git_ignore_path):
+        with open(git_ignore_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+        if ".codebase-memory" not in content:
+            with open(git_ignore_path, "a", encoding="utf-8") as f:
+                f.write("\n# codebase-memory-mcp\n.codebase-memory/\n*.graph.db*\n*.db.zst\n")
+            print("🛡️  Added .codebase-memory/ to project .gitignore")
+
+    print(f"\n🎉 [agent-harness] Ready! You can now start chatting with AI in any tool (TRAE, Cursor, Claude Code, Antigravity).\n")
+
+def cmd_setup():
+    print(BANNER)
+    print("🔧 [agent-harness] Scanning system for installed AI coding tools...\n")
+    
+    # 1. TRAE
+    trae_paths = [
+        os.path.expanduser("~/Library/Application Support/TRAE SOLO CN/User/mcp.json"),
+        os.path.expanduser("~/.trae/mcp.json")
+    ]
+    for tp in trae_paths:
+        os.makedirs(os.path.dirname(tp), exist_ok=True)
+        data = {"mcpServers": {"codebase-memory-mcp": {"command": CBM_BIN, "args": []}}}
+        if os.path.exists(tp):
+            try:
+                with open(tp, "r") as f:
+                    data = json.load(f)
+            except Exception:
+                pass
+        data.setdefault("mcpServers", {})["codebase-memory-mcp"] = {"command": CBM_BIN, "args": []}
+        with open(tp, "w") as f:
+            json.dump(data, f, indent=2)
+        print(f"  ✅ Configured TRAE MCP: {tp}")
+
+    # 2. Cursor
+    cursor_mcp = os.path.expanduser("~/.cursor/mcp.json")
+    os.makedirs(os.path.dirname(cursor_mcp), exist_ok=True)
+    cdata = {"mcpServers": {"codebase-memory-mcp": {"command": CBM_BIN, "args": []}}}
+    if os.path.exists(cursor_mcp):
+        try:
+            with open(cursor_mcp, "r") as f:
+                cdata = json.load(f)
+        except Exception:
+            pass
+    cdata.setdefault("mcpServers", {})["codebase-memory-mcp"] = {"command": CBM_BIN, "args": []}
+    with open(cursor_mcp, "w") as f:
+        json.dump(cdata, f, indent=2)
+    print(f"  ✅ Configured Cursor MCP: {cursor_mcp}")
+
+    # 3. Claude Code
+    claude_json = os.path.expanduser("~/.claude.json")
+    os.makedirs(os.path.dirname(claude_json), exist_ok=True)
+    cld = {}
+    if os.path.exists(claude_json):
+        try:
+            with open(claude_json, "r") as f:
+                cld = json.load(f)
+        except Exception:
+            pass
+    cld.setdefault("mcpServers", {})["codebase-memory-mcp"] = {"command": CBM_BIN, "args": []}
+    with open(claude_json, "w") as f:
+        json.dump(cld, f, indent=2)
+    print(f"  ✅ Configured Claude Code MCP: {claude_json}")
+
+    # 4. Antigravity / Gemini CLI
+    gemini_mcp = os.path.expanduser("~/.gemini/config/mcp_config.json")
+    os.makedirs(os.path.dirname(gemini_mcp), exist_ok=True)
+    gdata = {"mcpServers": {"codebase-memory-mcp": {"command": CBM_BIN, "args": []}}}
+    if os.path.exists(gemini_mcp):
+        try:
+            with open(gemini_mcp, "r") as f:
+                gdata = json.load(f)
+        except Exception:
+            pass
+    gdata.setdefault("mcpServers", {})["codebase-memory-mcp"] = {"command": CBM_BIN, "args": []}
+    with open(gemini_mcp, "w") as f:
+        json.dump(gdata, f, indent=2)
+    print(f"  ✅ Configured Antigravity MCP: {gemini_mcp}")
+
+    # 5. Global Git protection
+    global_gitignore = os.path.expanduser("~/.gitignore_global")
+    if not os.path.exists(global_gitignore):
+        with open(global_gitignore, "w") as f:
+            f.write("# codebase-memory-mcp\n.codebase-memory/\n*.graph.db*\n*.db.zst\n")
+    run_cmd(["git", "config", "--global", "core.excludesfile", global_gitignore])
+    print(f"  🛡️  Configured Global Git Exclude: {global_gitignore}")
+
+    print("\n✨ All installed AI development tools are configured and ready!\n")
+
+def cmd_status():
+    print(BANNER)
+    print("📊 [agent-harness] Checking daemon & knowledge graph status...\n")
+    if not os.path.exists(CBM_BIN):
+        print(f"❌ Error: {CBM_BIN} not found. Please install codebase-memory-mcp first.")
+        return
+
+    # Check daemon via run_cbm_cli
+    data = run_cbm_cli(["list_projects"])
+    if isinstance(data, dict):
+        projects = data.get("projects", [])
+        print("🟢 Knowledge Graph Engine: Running")
+        print(f"📁 Indexed Projects: {len(projects)}")
+        for p in projects:
+            name = p.get("name", "")
+            root = p.get("root_path", "")
+            print(f"   • {name} -> {root}")
+        print("\n🌐 3D Visualizer available at: http://localhost:9749\n")
+        return
+    print("⚠️ Could not fetch projects list from daemon.")
+
+def cmd_ui():
+    url = "http://localhost:9749"
+    print(f"🌐 Opening {url} in your default browser...")
+    webbrowser.open(url)
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help", "help"]:
+        print_help()
+        sys.exit(0)
+
+    subcmd = sys.argv[1].lower()
+
+    if subcmd == "init":
+        target = sys.argv[2] if len(sys.argv) > 2 else "."
+        cmd_init(target)
+    elif subcmd == "setup":
+        cmd_setup()
+    elif subcmd == "status":
+        cmd_status()
+    elif subcmd == "ui":
+        cmd_ui()
+    elif subcmd in ["-v", "--version", "version"]:
+        print(f"agent-harness version {VERSION}")
+    else:
+        print(f"Unknown command: {subcmd}")
+        print_help()
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
