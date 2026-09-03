@@ -13,7 +13,7 @@ import re
 import webbrowser
 import shutil
 
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 if sys.platform == "win32":
     CBM_BIN = os.path.expanduser("~/.local/bin/codebase-memory-mcp.exe")
@@ -193,9 +193,16 @@ def detect_test_harness(project_dir):
     has_rust = os.path.exists(os.path.join(project_dir, "Cargo.toml"))
     has_go = os.path.exists(os.path.join(project_dir, "go.mod"))
     has_node = os.path.exists(os.path.join(project_dir, "package.json"))
+    # Check Python indicators (supports bare Python projects, setup.py, scripts, and tests/)
     has_python = (
         os.path.exists(os.path.join(project_dir, "pyproject.toml")) or
-        os.path.exists(os.path.join(project_dir, "requirements.txt"))
+        os.path.exists(os.path.join(project_dir, "requirements.txt")) or
+        os.path.exists(os.path.join(project_dir, "setup.py")) or
+        os.path.exists(os.path.join(project_dir, "setup.cfg")) or
+        os.path.exists(os.path.join(project_dir, "Pipfile")) or
+        any(f.endswith(".py") for f in os.listdir(project_dir) if os.path.isfile(os.path.join(project_dir, f))) or
+        (os.path.isdir(os.path.join(project_dir, "tests")) and any(f.endswith(".py") for f in os.listdir(os.path.join(project_dir, "tests")))) or
+        (os.path.isdir(os.path.join(project_dir, "bin")) and any(os.path.isfile(os.path.join(project_dir, "bin", f)) for f in os.listdir(os.path.join(project_dir, "bin"))))
     )
 
     if has_rust:
@@ -211,8 +218,15 @@ def detect_test_harness(project_dir):
         harness.append("- **Node/TS 代码风格 (Lint)**：`npm run lint`")
 
     if has_python:
-        harness.append("- **Python 单元测试**：`pytest`")
-        harness.append("- **Python 类型与质量**：`mypy . && ruff check .`")
+        has_pytest = (
+            os.path.exists(os.path.join(project_dir, "pytest.ini")) or
+            os.path.exists(os.path.join(project_dir, "conftest.py"))
+        )
+        if has_pytest:
+            harness.append("- **Python 单元测试**：`pytest`")
+        else:
+            harness.append("- **Python 单元测试**：`python3 -m unittest discover -s tests -v` (若安装了 pytest 也可直接执行 `pytest`)")
+        harness.append("- **Python 语法与质量**：`python3 -m py_compile <入口文件>` 或 `ruff check .`")
 
     if not harness:
         harness.append("- **测试验证**：`# 请在此填入该技术栈的单元测试命令（如 pytest / go test / npm test）`")
@@ -399,7 +413,16 @@ def cmd_setup():
     gemini_mcp = os.path.expanduser("~/.gemini/config/mcp_config.json")
     safe_inject_mcp(gemini_mcp, "Antigravity")
 
-    # 5. Global Git protection
+    # 5. Windsurf
+    windsurf_paths = [os.path.expanduser("~/.codeium/windsurf/mcp_config.json")]
+    if sys.platform == "win32" and appdata:
+        userprofile = os.environ.get("USERPROFILE", "")
+        if userprofile:
+            windsurf_paths.append(os.path.join(userprofile, ".codeium", "windsurf", "mcp_config.json"))
+    for wp in windsurf_paths:
+        safe_inject_mcp(wp, "Windsurf")
+
+    # 6. Global Git protection
     global_gitignore = os.path.expanduser("~/.gitignore_global")
     if not os.path.exists(global_gitignore):
         with open(global_gitignore, "w", encoding="utf-8") as f:

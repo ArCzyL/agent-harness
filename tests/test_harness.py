@@ -68,6 +68,18 @@ class TestTestHarnessDetection(unittest.TestCase):
         self.assertIn("go test", res)
         self.assertIn("npm test", res)
 
+    def test_bare_python_project_detection(self):
+        # Tests a bare Python repo like agent-harness (no pyproject.toml, but has .py and tests/)
+        tests_subdir = os.path.join(self.test_dir, "tests")
+        os.makedirs(tests_subdir, exist_ok=True)
+        with open(os.path.join(tests_subdir, "test_sample.py"), "w") as f:
+            f.write("import unittest\n")
+        with open(os.path.join(self.test_dir, "script.py"), "w") as f:
+            f.write("print('hello')\n")
+        
+        res = ah.detect_test_harness(self.test_dir)
+        self.assertIn("unittest", res)
+
 class TestTemplateAndArchitectureParsing(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
