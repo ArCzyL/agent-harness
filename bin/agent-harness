@@ -11,8 +11,9 @@ import json
 import subprocess
 import re
 import webbrowser
+import shutil
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 if sys.platform == "win32":
     CBM_BIN = os.path.expanduser("~/.local/bin/codebase-memory-mcp.exe")
@@ -55,8 +56,11 @@ def run_cbm_cli(args):
     if json_start != -1:
         try:
             return json.loads(output[json_start:])
-        except Exception:
-            pass
+        except Exception as e:
+            if os.environ.get("DEBUG"):
+                print(f"⚠️ Failed to parse CBM JSON output: {e}", file=sys.stderr)
+    elif res.stderr and os.environ.get("DEBUG"):
+        print(f"⚠️ CBM CLI Error: {res.stderr.strip()}", file=sys.stderr)
     return None
 
 def get_templates_dir():
@@ -165,26 +169,37 @@ def parse_architecture(arch_res, target_dir):
     return languages_str, entry_points
 
 def detect_test_harness(project_dir):
-    """Detects test commands and build tools based on files in project_dir."""
+    """
+    Detects test commands and build tools based on files in project_dir.
+    Supports multi-stack monorepos (e.g. Go backend + TS frontend, or Rust core + Python bindings).
+    """
     harness = []
     
-    if os.path.exists(os.path.join(project_dir, "Cargo.toml")):
-        harness.append("- **代码编译检查**：`cargo check`")
-        harness.append("- **单元与集成测试**：`cargo test`")
-        harness.append("- **代码质量与严谨检查 (Clippy)**：`cargo clippy --all-targets -- -D warnings`")
-    elif os.path.exists(os.path.join(project_dir, "go.mod")):
-        harness.append("- **代码编译检查**：`go build ./...`")
-        harness.append("- **单元测试验证**：`go test -v ./...`")
-        harness.append("- **静态代码检查 (Vet)**：`go vet ./...`")
-    elif os.path.exists(os.path.join(project_dir, "package.json")):
-        harness.append("- **类型与构建检查**：`npx tsc --noEmit` (或 `npm run build`)")
-        harness.append("- **单元测试验证**：`npm test` (或 `pnpm test` / `bun test`)")
-        harness.append("- **代码风格检查 (Lint)**：`npm run lint`")
-    elif os.path.exists(os.path.join(project_dir, "pyproject.toml")) or os.path.exists(os.path.join(project_dir, "requirements.txt")):
-        harness.append("- **单元测试验证**：`pytest`")
-        harness.append("- **类型检查**：`mypy .`")
-        harness.append("- **代码质量检查 (Lint)**：`ruff check .`")
-    else:
+    has_rust = os.path.exists(os.path.join(project_dir, "Cargo.toml"))
+    has_go = os.path.exists(os.path.join(project_dir, "go.mod"))
+    has_node = os.path.exists(os.path.join(project_dir, "package.json"))
+    has_python = (
+        os.path.exists(os.path.join(project_dir, "pyproject.toml")) or
+        os.path.exists(os.path.join(project_dir, "requirements.txt"))
+    )
+
+    if has_rust:
+        harness.append("- **Rust 编译与测试**：`cargo check && cargo test`")
+        harness.append("- **Rust 代码质量 (Clippy)**：`cargo clippy --all-targets -- -D warnings`")
+
+    if has_go:
+        harness.append("- **Go 编译与单元测试**：`go build ./... && go test -v ./...`")
+        harness.append("- **Go 静态代码检查 (Vet)**：`go vet ./...`")
+
+    if has_node:
+        harness.append("- **Node/TS 类型与测试**：`npx tsc --noEmit && npm test` (或 `pnpm test` / `bun test`)")
+        harness.append("- **Node/TS 代码风格 (Lint)**：`npm run lint`")
+
+    if has_python:
+        harness.append("- **Python 单元测试**：`pytest`")
+        harness.append("- **Python 类型与质量**：`mypy . && ruff check .`")
+
+    if not harness:
         harness.append("- **测试验证**：`# 请在此填入该技术栈的单元测试命令（如 pytest / go test / npm test）`")
         harness.append("- **构建检查**：`# 请在此填入该技术栈的构建/语法检查命令`")
 
@@ -294,7 +309,6 @@ def cmd_init(target_dir):
                 print(f"  + Created symlink: {alias} -> AGENTS.md")
             except Exception:
                 try:
-                    import shutil
                     shutil.copyfile(agents_path, alias_path)
                     print(f"  + Created copy: {alias} (Windows fallback)")
                 except Exception:
@@ -312,6 +326,35 @@ def cmd_init(target_dir):
 
     print(f"\n🎉 [agent-harness] Ready! You can now start chatting with AI in any tool (TRAE, Cursor, Claude Code, Antigravity).\n")
 
+def safe_inject_mcp(target_path, ide_name):
+    """Safely injects codebase-memory-mcp into an IDE's JSON configuration with corruption backup."""
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    data = {}
+    if os.path.exists(target_path):
+        try:
+            with open(target_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            bak_path = target_path + ".bak"
+            print(f"  ⚠️ Warning: Failed to parse existing JSON at {target_path} ({e})")
+            print(f"     Creating backup at {bak_path} before updating.")
+            try:
+                shutil.copyfile(target_path, bak_path)
+            except Exception:
+                pass
+            data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    data.setdefault("mcpServers", {})["codebase-memory-mcp"] = {
+        "command": CBM_BIN,
+        "args": []
+    }
+    with open(target_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    print(f"  ✅ Configured {ide_name} MCP: {target_path}")
+
 def cmd_setup():
     print(BANNER)
     print("🔧 [agent-harness] Scanning system for installed AI coding tools...\n")
@@ -327,68 +370,24 @@ def cmd_setup():
         trae_paths.append(os.path.join(appdata, "TRAE SOLO CN", "User", "mcp.json"))
         
     for tp in trae_paths:
-        os.makedirs(os.path.dirname(tp), exist_ok=True)
-        data = {"mcpServers": {"codebase-memory-mcp": {"command": CBM_BIN, "args": []}}}
-        if os.path.exists(tp):
-            try:
-                with open(tp, "r") as f:
-                    data = json.load(f)
-            except Exception:
-                pass
-        data.setdefault("mcpServers", {})["codebase-memory-mcp"] = {"command": CBM_BIN, "args": []}
-        with open(tp, "w") as f:
-            json.dump(data, f, indent=2)
-        print(f"  ✅ Configured TRAE MCP: {tp}")
+        safe_inject_mcp(tp, "TRAE")
 
     # 2. Cursor
     cursor_mcp = os.path.expanduser("~/.cursor/mcp.json")
-    os.makedirs(os.path.dirname(cursor_mcp), exist_ok=True)
-    cdata = {"mcpServers": {"codebase-memory-mcp": {"command": CBM_BIN, "args": []}}}
-    if os.path.exists(cursor_mcp):
-        try:
-            with open(cursor_mcp, "r") as f:
-                cdata = json.load(f)
-        except Exception:
-            pass
-    cdata.setdefault("mcpServers", {})["codebase-memory-mcp"] = {"command": CBM_BIN, "args": []}
-    with open(cursor_mcp, "w") as f:
-        json.dump(cdata, f, indent=2)
-    print(f"  ✅ Configured Cursor MCP: {cursor_mcp}")
+    safe_inject_mcp(cursor_mcp, "Cursor")
 
     # 3. Claude Code
     claude_json = os.path.expanduser("~/.claude.json")
-    os.makedirs(os.path.dirname(claude_json), exist_ok=True)
-    cld = {}
-    if os.path.exists(claude_json):
-        try:
-            with open(claude_json, "r") as f:
-                cld = json.load(f)
-        except Exception:
-            pass
-    cld.setdefault("mcpServers", {})["codebase-memory-mcp"] = {"command": CBM_BIN, "args": []}
-    with open(claude_json, "w") as f:
-        json.dump(cld, f, indent=2)
-    print(f"  ✅ Configured Claude Code MCP: {claude_json}")
+    safe_inject_mcp(claude_json, "Claude Code")
 
     # 4. Antigravity / Gemini CLI
     gemini_mcp = os.path.expanduser("~/.gemini/config/mcp_config.json")
-    os.makedirs(os.path.dirname(gemini_mcp), exist_ok=True)
-    gdata = {"mcpServers": {"codebase-memory-mcp": {"command": CBM_BIN, "args": []}}}
-    if os.path.exists(gemini_mcp):
-        try:
-            with open(gemini_mcp, "r") as f:
-                gdata = json.load(f)
-        except Exception:
-            pass
-    gdata.setdefault("mcpServers", {})["codebase-memory-mcp"] = {"command": CBM_BIN, "args": []}
-    with open(gemini_mcp, "w") as f:
-        json.dump(gdata, f, indent=2)
-    print(f"  ✅ Configured Antigravity MCP: {gemini_mcp}")
+    safe_inject_mcp(gemini_mcp, "Antigravity")
 
     # 5. Global Git protection
     global_gitignore = os.path.expanduser("~/.gitignore_global")
     if not os.path.exists(global_gitignore):
-        with open(global_gitignore, "w") as f:
+        with open(global_gitignore, "w", encoding="utf-8") as f:
             f.write("# codebase-memory-mcp\n.codebase-memory/\n*.graph.db*\n*.db.zst\n")
     run_cmd(["git", "config", "--global", "core.excludesfile", global_gitignore])
     print(f"  🛡️  Configured Global Git Exclude: {global_gitignore}")

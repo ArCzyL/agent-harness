@@ -59,6 +59,15 @@ class TestTestHarnessDetection(unittest.TestCase):
         self.assertIn("pytest", res)
         self.assertIn("ruff check", res)
 
+    def test_monorepo_multi_stack_detection(self):
+        with open(os.path.join(self.test_dir, "go.mod"), "w") as f:
+            f.write("module monorepo\n")
+        with open(os.path.join(self.test_dir, "package.json"), "w") as f:
+            f.write('{"name": "frontend"}')
+        res = ah.detect_test_harness(self.test_dir)
+        self.assertIn("go test", res)
+        self.assertIn("npm test", res)
+
 class TestTemplateAndArchitectureParsing(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
@@ -122,12 +131,26 @@ class TestInitExecutionAndSafety(unittest.TestCase):
         with open(git_ignore_path, "w", encoding="utf-8") as f:
             f.write("node_modules/\n")
 
-        # Run init
         ah.cmd_init(self.test_dir)
 
         with open(git_ignore_path, "r", encoding="utf-8") as f:
             content = f.read()
         self.assertIn(".codebase-memory/", content)
+
+    def test_safe_inject_mcp_with_corrupt_json(self):
+        mcp_path = os.path.join(self.test_dir, "mcp.json")
+        with open(mcp_path, "w", encoding="utf-8") as f:
+            f.write("{ INVALID JSON ,,, ")
+
+        ah.safe_inject_mcp(mcp_path, "TestIDE")
+
+        # Verify .bak was created
+        self.assertTrue(os.path.isfile(mcp_path + ".bak"))
+        # Verify clean valid JSON was written
+        import json
+        with open(mcp_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertIn("codebase-memory-mcp", data["mcpServers"])
 
 if __name__ == "__main__":
     unittest.main()
