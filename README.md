@@ -32,10 +32,12 @@ Every developer pairing with AI coding agents (Cursor, TRAE, Claude Code, Antigr
 * 🧠 **Persistent Codebase Knowledge Graph**:
   Powered by the open-source **[DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)** (kudos to the author and community). Uses a high-performance, single-binary C daemon to index ASTs, call graphs, routes, and type hierarchies into a local SQLite database. **Sub-millisecond queries, reducing structural exploration tokens by over 99%**.
 * 🥋 **Karpathy's 4 Golden Behavioral Rules**:
-  * **Think Before Writing**: Explicitly state assumptions; never silently pick an arbitrary interpretation when requirements are ambiguous.
-  * **Simplicity First**: Write the minimum code necessary. No speculative features, no premature factory abstractions.
-  * **Surgical Edits**: Touch only what the task requires. Never "clean up" working neighboring files; keep Git Diffs minimal and auditable.
+  * **Think Before Writing**: Explicitly state assumptions; when requirements are ambiguous, list the interpretations and confirm with the developer before coding.
+  * **Simplicity First**: Write the minimum code necessary. Build only what the current task needs and keep one-off logic inline.
+  * **Surgical Edits**: Touch only what the task requires. Leave unrelated files exactly as they are; keep Git Diffs minimal and auditable.
   * **Goal-Driven Execution**: Convert every task into verifiable criteria. Write tests first, verify in terminal before delivery.
+* 📝 **Rules That Survive Long Sessions**:
+  The generated `AGENTS.md` states every rule affirmatively as "what to do and how", describing only the correct behavior, and asks the agent to write docs, comments, and session summaries the same way. Long-term requirements you give in chat are written into `AGENTS.md` in the same turn, so the rules stay complete and correct after context compression.
 * 🔒 **Physical Test Harness (The Execution Loop)**:
   Auto-detects your project's technology stack (Go, Rust, TypeScript, Python, etc., including Monorepos) and binds terminal test/lint commands. Forces the agent into an autonomous self-healing loop:  
   $$\text{Code} \longrightarrow \text{Run Test} \longrightarrow \text{Auto-Fix Errors} \longrightarrow \text{All Green} \longrightarrow \text{Deliver}$$

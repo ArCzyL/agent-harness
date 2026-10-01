@@ -36,10 +36,12 @@
 * 🧠 **本地持久化知识图谱（Token 消耗降低 99% 以上）**：
   底层代码知识图谱能力基于开源项目 **[DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)**（致敬原作者与开源社区）。采用纯 C 语言编写的高性能单二进制守护引擎，将代码 AST、调用链、接口路由与类型系统持久化存入本地 SQLite，**查询延迟低于 1 毫秒，将结构性探索的 Token 消耗暴降 99% 以上**。
 * 🥋 **Karpathy 防翻车四大行为准则（行为围栏）**：
-  * **先想再写 (Think Before Writing)**：把假设说出口；需求有歧义必须先确认，严禁擅自猜测闷头写代码。
-  * **简单优先 (Keep It Simple)**：写解决问题所需的最少代码；坚决拒绝过度设计和无用抽象模式。
-  * **手术式修改 (Surgical Edits)**：只改任务要求触碰的代码；严禁顺手修改隔壁正常运行的无关文件，保持 Git Diff 极小可审计。
-  * **目标驱动执行 (Goal-Driven Execution)**：将每个任务变成可量化的测试指标；必须在终端实际跑通测试才准交差。
+  * **先想再写 (Think Before Writing)**：把假设说出口；需求有歧义时先向开发者确认，再动手写代码。
+  * **简单优先 (Keep It Simple)**：写解决问题所需的最少代码；只实现本次需求用到的功能。
+  * **手术式修改 (Surgical Edits)**：只改任务要求触碰的代码；无关文件保持原样，Git Diff 极小、可逐行审查。
+  * **目标驱动执行 (Goal-Driven Execution)**：将每个任务变成可量化的测试指标；交付时附上终端实际跑通的测试结果。
+* 📝 **长会话不走样的规则写法**：
+  生成的 `AGENTS.md` 全部用肯定句写成「做什么、怎么做」，只写正确做法，并要求 AI 也这样写文档、注释和会话总结；你在对话中提出的长期要求，AI 会当轮写进 `AGENTS.md`。长会话压缩上下文后，AI 读到的仍是完整、正确的规则。
 * 🔒 **物理测试闭环（Test Harness Loop）**：
   自动嗅探项目技术栈（Go, Rust, TypeScript/Node, Python 等，含 Monorepo 多栈支持），自动绑定终端编译与测试命令。强制 AI 进入自动化自愈闭环：  
   $$\text{编写/修改代码} \longrightarrow \text{运行测试命令} \longrightarrow \text{根据报错自行修复} \longrightarrow \text{全部绿灯通过} \longrightarrow \text{交付开发者}$$

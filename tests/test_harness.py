@@ -368,6 +368,24 @@ class TestDocAlignment(unittest.TestCase):
         self.assertIn("文档与代码对齐", content)
         self.assertIn("agent-harness check", content)
 
+    def test_rules_are_written_affirmatively(self):
+        # A negated rule ("never B") names B; after context compression an agent may keep B and lose the "never"
+        negations = ["严禁", "禁止", "不要", "不得", "绝不", "坚决不", "切勿", "避免"]
+        ah.cmd_init(self.test_dir)
+        with open(os.path.join(self.test_dir, "AGENTS.md"), "r", encoding="utf-8") as f:
+            generated = f.read()
+        with open(os.path.join(SCRIPT_DIR, "..", "templates", "karpathy_rules.md"), "r", encoding="utf-8") as f:
+            template = f.read()
+        with open(os.path.join(SCRIPT_DIR, "..", "AGENTS.md"), "r", encoding="utf-8") as f:
+            repo_rules = f.read()
+        for name, text in [("generated", generated), ("template", template),
+                           ("fallback", ah.DEFAULT_KARPATHY_RULES), ("repo AGENTS.md", repo_rules)]:
+            found = [w for w in negations if w in text]
+            self.assertEqual(found, [], name)
+        for text in [generated, repo_rules]:
+            self.assertIn("只写正确做法", text)
+            self.assertIn("长期要求写进本文件", text)
+
     def test_init_graph_rule_degrades_when_tool_unavailable(self):
         ah.cmd_init(self.test_dir)
         with open(os.path.join(self.test_dir, "AGENTS.md"), "r", encoding="utf-8") as f:
