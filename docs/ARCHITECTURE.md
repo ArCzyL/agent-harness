@@ -49,7 +49,7 @@ The framework consists of three tightly coupled, lightweight layers:
 ### Flow A: Project Initialization (`agent-harness init [path]`)
 1. **Zero-Overwrite Safety Check**: Inspects if `AGENTS.md` already exists. If present, skips generation to preserve developer-crafted custom invariants.
 2. **Knowledge Graph Indexing**: Calls `codebase-memory-mcp cli index_repository --repo-path <dir>` to ingest AST and call chains.
-3. **Architectural Inspection**: Extracts language breakdown and entry points with fallback to direct filesystem heuristic analysis.
+3. **Stack Fact Detection**: Derives languages and entry points from filesystem rules only — the same rules `check` / `sync` use — so a fresh `init` never fails `check`, and the result does not depend on whether the engine is installed. The graph itself is for agents to query at runtime (its own entry-point heuristic, e.g. exported functions, intentionally does not feed `AGENTS.md`).
 4. **Test Harness Synthesis**: Analyzes project manifest files (`Cargo.toml`, `go.mod`, `package.json`, `pyproject.toml`) and binds automated test/lint commands.
 5. **Template Assembly**: Dynamically loads `templates/karpathy_rules.md` (with embedded fallback) to compose the finalized `AGENTS.md`.
 6. **Cross-IDE Compatibility**: Writes `CLAUDE.md` / `GEMINI.md` containing only `@AGENTS.md` (an import, not a symlink, so tools that read several rule files load the rules once and Windows needs no copy fallback). Legacy symlinks to `AGENTS.md` from older versions, including `.cursorrules`, are migrated; hand-written alias files are left untouched.
@@ -78,6 +78,6 @@ The framework consists of three tightly coupled, lightweight layers:
 | Decision | Selected Approach | Rationale |
 | :--- | :--- | :--- |
 | **Runtime Language** | Python 3 Standard Library only | Zero external dependencies (`pip`/`npm`), runs out of the box on macOS, Linux, and Windows. |
-| **Memory Engine** | [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) (C / SQLite) | Single 15MB binary, sub-millisecond AST queries, 99%+ token reduction, minimal RAM footprint (<30MB). |
+| **Memory Engine** | [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) (C / SQLite) | Single self-contained binary (~300MB for v0.10.8 on macOS), sub-millisecond AST queries, 99%+ token reduction, small idle RAM footprint (~15MB measured). CLI `--json` output is an MCP tool-result envelope; `run_cbm_cli` unwraps `structuredContent`. |
 | **Specification Source of Truth** | Universal `AGENTS.md` | Adopted by the Agentic AI Foundation / Linux Foundation; supported natively by modern IDEs, backward-compatible via one-line `@AGENTS.md` imports. |
 | **Verification Loop** | Test Harness + `agent-harness check` | Compilers catch broken code; `check` catches stale AGENTS.md that would poison the next session. |

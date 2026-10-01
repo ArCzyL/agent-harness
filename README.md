@@ -82,7 +82,7 @@ Open **TRAE**, **Cursor**, **Claude Code**, or **Antigravity** in that project a
 
 ### What happens:
 1. **Zero Overwrite Safety**: If you already have hand-crafted rules in `AGENTS.md`, it **never** overwrites them.
-2. **AST Architectural Scan**: Parses languages, modules, and entry points into the local knowledge graph (with directory-level fallback).
+2. **Graph Index + Stack Facts**: Indexes the project into the local knowledge graph for agents to query; the languages and entry points written to `AGENTS.md` come from filesystem rules shared with `check` / `sync`, so they never disagree and don't depend on whether the engine is installed.
 3. **Tailor-Made `AGENTS.md`**: Generates a project-specific specification with your stack's exact test harness and Karpathy rules.
 4. **Universal Import Sync**: Creates `CLAUDE.md` / `GEMINI.md` containing only `@AGENTS.md`; symlinks left by older versions (including `.cursorrules`) are migrated automatically.
 

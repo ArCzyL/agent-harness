@@ -123,7 +123,7 @@ class TestTemplateAndArchitectureParsing(unittest.TestCase):
         with open(os.path.join(self.test_dir, "worker.py"), "w") as f:
             f.write("print('hello')\n")
         
-        langs, entries = ah.parse_architecture(None, self.test_dir)
+        langs, entries = ah.parse_architecture(self.test_dir)
         self.assertTrue("Rust" in langs or "Python" in langs)
         self.assertIn("main.rs", entries)
 
@@ -134,7 +134,7 @@ class TestTemplateAndArchitectureParsing(unittest.TestCase):
             f.write("#!/usr/bin/env python3\n")
         with open(os.path.join(bin_dir, "agent-harness.cmd"), "w") as f:
             f.write("@echo off\n")
-        langs, entries = ah.parse_architecture(None, self.test_dir)
+        langs, entries = ah.parse_architecture(self.test_dir)
         self.assertIn("bin/agent-harness", entries)
         self.assertNotIn("bin/agent-harness.cmd", entries)
 
@@ -147,7 +147,7 @@ class TestTemplateAndArchitectureParsing(unittest.TestCase):
         for i in range(5):
             with open(os.path.join(self.test_dir, "node_modules", "dep", "m{0}.js".format(i)), "w") as f:
                 f.write("module.exports = {}\n")
-        langs, _ = ah.parse_architecture(None, self.test_dir)
+        langs, _ = ah.parse_architecture(self.test_dir)
         self.assertEqual(langs, "Go")
 
     def test_extract_json_payload_with_noisy_logs(self):
@@ -161,6 +161,22 @@ level=info msg="finished in 0.12s"
         self.assertIsNotNone(payload)
         self.assertEqual(payload.get("project"), "Users-test-project")
         self.assertEqual(payload.get("nodes"), 127)
+
+    def test_run_cbm_cli_unwraps_mcp_tool_result_envelope(self):
+        # codebase-memory-mcp 0.10.x prints an MCP tool result; the payload lives in structuredContent
+        fake_bin = os.path.join(self.test_dir, "fake-cbm")
+        with open(fake_bin, "w") as f:
+            f.write("#!/bin/sh\necho 'level=info msg=\"start {x}\"'\n")
+            f.write("echo '{\"content\":[{\"type\":\"text\",\"text\":\"{}\"}],"
+                    "\"structuredContent\":{\"project\":\"demo\",\"nodes\":33,\"edges\":38},\"isError\":false}'\n")
+        os.chmod(fake_bin, 0o755)
+        orig_bin = ah.CBM_BIN
+        ah.CBM_BIN = fake_bin
+        try:
+            res = ah.run_cbm_cli(["index_repository"])
+        finally:
+            ah.CBM_BIN = orig_bin
+        self.assertEqual(res, {"project": "demo", "nodes": 33, "edges": 38})
 
 class TestInitExecutionAndSafety(unittest.TestCase):
     def setUp(self):
@@ -290,6 +306,26 @@ class TestDocAlignment(unittest.TestCase):
             f.write("Built with Google tools. `main.go`. Run go test ./...\n")
         issues = ah.alignment_issues(self.test_dir)
         self.assertTrue(any("Go 代码" in item for item in issues), issues)
+
+    def test_check_passes_right_after_init_even_if_graph_disagrees(self):
+        # The graph's notion of entry points differs from check's filesystem rules; init must follow check
+        arch_text = ("languages: 1  (cols: language files)\n  TypeScript 2\n"
+                     "entry_points: 1  (cols: qn file)\n  demo.src.api.users.getUser src/api/users.ts\n")
+        ah.run_cbm_cli = lambda args: (
+            {"content": [{"type": "text", "text": arch_text}]} if args[0] == "get_architecture"
+            else {"project": "demo", "nodes": 33, "edges": 38}
+        )
+        os.makedirs(os.path.join(self.test_dir, "src", "api"))
+        os.makedirs(os.path.join(self.test_dir, "bin"))
+        for rel, body in [("package.json", '{"name": "demo"}'), ("src/index.ts", "main();\n"),
+                          ("src/api/users.ts", "export function getUser() {}\n"),
+                          ("bin/cli.js", "#!/usr/bin/env node\n")]:
+            with open(os.path.join(self.test_dir, rel), "w") as f:
+                f.write(body)
+
+        ah.cmd_init(self.test_dir)
+
+        self.assertEqual(ah.alignment_issues(self.test_dir), [])
 
     def test_check_missing_agents_md(self):
         issues = ah.alignment_issues(self.test_dir)

@@ -98,14 +98,14 @@ fi
 
 # 4. Ensure ~/.local/bin in PATH
 SHELL_RC=""
-if [ -n "${ZSH_VERSION}" ] || [ -n "${ZSH_NAME}" ] || [ -f "${HOME}/.zshrc" ]; then
+if [ -n "${ZSH_VERSION}" ] || [ -n "${ZSH_NAME}" ] || [ -f "${HOME}/.zshrc" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
     SHELL_RC="${HOME}/.zshrc"
 elif [ -f "${HOME}/.bashrc" ]; then
     SHELL_RC="${HOME}/.bashrc"
 fi
 
 if [ -n "${SHELL_RC}" ]; then
-    if ! grep -q "export PATH=\"${INSTALL_DIR}:\$PATH\"" "${SHELL_RC}" && ! echo "$PATH" | grep -q "${INSTALL_DIR}"; then
+    if ! grep -q "export PATH=\"${INSTALL_DIR}:\$PATH\"" "${SHELL_RC}" 2>/dev/null && ! echo "$PATH" | grep -q "${INSTALL_DIR}"; then
         echo -e "\n# agent-harness\nexport PATH=\"${INSTALL_DIR}:\$PATH\"" >> "${SHELL_RC}"
         echo -e "✅ Added ${INSTALL_DIR} to PATH in ${SHELL_RC}"
     fi
