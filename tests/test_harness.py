@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Unit and Integration Tests for agent-harness
-Verifies language detection, zero-overwrite protection, template loading, and cross-IDE symlinks.
+Verifies language detection, zero-overwrite protection, template loading, and cross-IDE alias files.
 """
 
 import os
@@ -81,6 +81,20 @@ class TestTestHarnessDetection(unittest.TestCase):
         self.assertIn("unittest", res)
         self.assertIn("agent-harness check", res)
 
+    def test_node_bin_script_is_not_python(self):
+        with open(os.path.join(self.test_dir, "package.json"), "w") as f:
+            f.write('{"name": "cli"}')
+        os.makedirs(os.path.join(self.test_dir, "bin"))
+        with open(os.path.join(self.test_dir, "bin", "cli.js"), "w") as f:
+            f.write("#!/usr/bin/env node\n")
+        self.assertFalse(ah.detect_stacks(self.test_dir)["python"])
+
+    def test_python_shebang_bin_script_is_python(self):
+        os.makedirs(os.path.join(self.test_dir, "bin"))
+        with open(os.path.join(self.test_dir, "bin", "tool"), "w") as f:
+            f.write("#!/usr/bin/env python3\n")
+        self.assertTrue(ah.detect_stacks(self.test_dir)["python"])
+
     def test_harness_always_includes_doc_alignment_check(self):
         with open(os.path.join(self.test_dir, "Cargo.toml"), "w") as f:
             f.write("[package]\nname = 'test'\n")
@@ -96,6 +110,7 @@ class TestTemplateAndArchitectureParsing(unittest.TestCase):
 
     def test_template_loading(self):
         rules = ah.load_karpathy_rules()
+        self.assertTrue(rules.startswith("## 2. "), "Rules section must be numbered 2 between sections 1 and 3")
         self.assertIn("先想再写", rules)
         self.assertIn("简单优先", rules)
         self.assertIn("手术式修改", rules)
@@ -122,6 +137,18 @@ class TestTemplateAndArchitectureParsing(unittest.TestCase):
         langs, entries = ah.parse_architecture(None, self.test_dir)
         self.assertIn("bin/agent-harness", entries)
         self.assertNotIn("bin/agent-harness.cmd", entries)
+
+    def test_directory_scan_excludes_by_exact_name_only(self):
+        for sub in ["src/targets", "src/vendors", "node_modules/dep"]:
+            os.makedirs(os.path.join(self.test_dir, sub))
+        for sub in ["src/targets", "src/vendors"]:
+            with open(os.path.join(self.test_dir, sub, "a.go"), "w") as f:
+                f.write("package a\n")
+        for i in range(5):
+            with open(os.path.join(self.test_dir, "node_modules", "dep", "m{0}.js".format(i)), "w") as f:
+                f.write("module.exports = {}\n")
+        langs, _ = ah.parse_architecture(None, self.test_dir)
+        self.assertEqual(langs, "Go")
 
     def test_extract_json_payload_with_noisy_logs(self):
         # Simulates CBM output with fake bracket in log message, valid JSON payload, and trailing log
@@ -160,17 +187,35 @@ class TestInitExecutionAndSafety(unittest.TestCase):
             content = f.read()
         self.assertEqual(content, secret_text)
 
-    def test_symlinks_creation(self):
-        # Run init on clean directory
+    def test_alias_files_import_agents_md(self):
         ah.cmd_init(self.test_dir)
 
-        # Verify AGENTS.md was created
         self.assertTrue(os.path.isfile(os.path.join(self.test_dir, "AGENTS.md")))
-
-        # Verify compatibility symlinks (or copies) exist
-        for alias in ["CLAUDE.md", "GEMINI.md", ".cursorrules"]:
+        # Import stubs instead of symlinks: tools that read several rule files (e.g. Cursor) load the rules once
+        for alias in ["CLAUDE.md", "GEMINI.md"]:
             alias_path = os.path.join(self.test_dir, alias)
-            self.assertTrue(os.path.exists(alias_path), f"Missing alias: {alias}")
+            self.assertFalse(os.path.islink(alias_path), f"{alias} should not be a symlink")
+            with open(alias_path, "r", encoding="utf-8") as f:
+                self.assertEqual(f.read().strip(), "@AGENTS.md")
+        self.assertFalse(os.path.lexists(os.path.join(self.test_dir, ".cursorrules")))
+
+    def test_init_migrates_legacy_symlinks_and_keeps_handwritten_alias(self):
+        with open(os.path.join(self.test_dir, "AGENTS.md"), "w", encoding="utf-8") as f:
+            f.write("# rules\n")
+        os.symlink("AGENTS.md", os.path.join(self.test_dir, "CLAUDE.md"))
+        os.symlink("AGENTS.md", os.path.join(self.test_dir, ".cursorrules"))
+        with open(os.path.join(self.test_dir, "GEMINI.md"), "w", encoding="utf-8") as f:
+            f.write("# my gemini notes\n")
+
+        ah.cmd_init(self.test_dir)
+
+        claude_path = os.path.join(self.test_dir, "CLAUDE.md")
+        self.assertFalse(os.path.islink(claude_path))
+        with open(claude_path, "r", encoding="utf-8") as f:
+            self.assertEqual(f.read().strip(), "@AGENTS.md")
+        self.assertFalse(os.path.lexists(os.path.join(self.test_dir, ".cursorrules")))
+        with open(os.path.join(self.test_dir, "GEMINI.md"), "r", encoding="utf-8") as f:
+            self.assertEqual(f.read(), "# my gemini notes\n")
 
     def test_gitignore_protection(self):
         git_ignore_path = os.path.join(self.test_dir, ".gitignore")
@@ -218,6 +263,21 @@ class TestDocAlignment(unittest.TestCase):
         self.assertIn("agent-harness:auto:harness", content)
         self.assertIn("文档与代码对齐", content)
         self.assertIn("agent-harness check", content)
+
+    def test_init_graph_rule_degrades_when_tool_unavailable(self):
+        ah.cmd_init(self.test_dir)
+        with open(os.path.join(self.test_dir, "AGENTS.md"), "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("若工具不可用", content)
+        self.assertNotIn("严禁直接全文盲目 grep", content)
+
+    def test_check_language_needs_whole_word(self):
+        with open(os.path.join(self.test_dir, "main.go"), "w") as f:
+            f.write("package main\n")
+        with open(os.path.join(self.test_dir, "AGENTS.md"), "w", encoding="utf-8") as f:
+            f.write("Built with Google tools. `main.go`. Run go test ./...\n")
+        issues = ah.alignment_issues(self.test_dir)
+        self.assertTrue(any("Go 代码" in item for item in issues), issues)
 
     def test_check_missing_agents_md(self):
         issues = ah.alignment_issues(self.test_dir)

@@ -158,9 +158,9 @@ def parse_architecture(arch_res, target_dir):
             ".js": "JavaScript", ".java": "Java", ".c": "C", ".cpp": "C++",
             ".rb": "Ruby", ".php": "PHP", ".swift": "Swift", ".kt": "Kotlin"
         }
+        skip_dirs = {"node_modules", "target", "vendor"}
         for root, dirs, files in os.walk(target_dir):
-            if any(p in root for p in [".git", "node_modules", "target", "vendor", ".venv"]):
-                continue
+            dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith(".")]
             for f in files:
                 ext = os.path.splitext(f)[1].lower()
                 if ext in ext_map:
@@ -195,6 +195,22 @@ def parse_architecture(arch_res, target_dir):
 
     return languages_str, entry_points
 
+def has_python_bin_script(project_dir):
+    bin_dir = os.path.join(project_dir, "bin")
+    if not os.path.isdir(bin_dir):
+        return False
+    for fname in os.listdir(bin_dir):
+        fpath = os.path.join(bin_dir, fname)
+        if not os.path.isfile(fpath):
+            continue
+        if fname.endswith(".py"):
+            return True
+        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+            first_line = f.readline()
+        if first_line.startswith("#!") and "python" in first_line:
+            return True
+    return False
+
 def detect_stacks(project_dir):
     """Filesystem signals used by harness synthesis and AGENTS.md alignment checks."""
     has_python = (
@@ -205,7 +221,7 @@ def detect_stacks(project_dir):
         os.path.exists(os.path.join(project_dir, "Pipfile")) or
         any(f.endswith(".py") for f in os.listdir(project_dir) if os.path.isfile(os.path.join(project_dir, f))) or
         (os.path.isdir(os.path.join(project_dir, "tests")) and any(f.endswith(".py") for f in os.listdir(os.path.join(project_dir, "tests")))) or
-        (os.path.isdir(os.path.join(project_dir, "bin")) and any(os.path.isfile(os.path.join(project_dir, "bin", f)) for f in os.listdir(os.path.join(project_dir, "bin"))))
+        has_python_bin_script(project_dir)
     )
     return {
         "rust": os.path.exists(os.path.join(project_dir, "Cargo.toml")),
@@ -295,7 +311,7 @@ def alignment_issues(target_dir):
     for lang in [part.strip() for part in languages_str.split(",") if part.strip()]:
         if lang in skip_langs:
             continue
-        if lang not in text:
+        if not re.search(r"(?<![A-Za-z])" + re.escape(lang) + r"(?![A-Za-z])", text):
             issues.append("仓库含 {0} 代码，但 AGENTS.md 未记录该语言".format(lang))
 
     for ep in entry_points:
@@ -427,13 +443,12 @@ def cmd_init(target_dir):
 ---
 
 ## 4. 代码知识图谱检索纪律 (Codebase Memory)
-- 探索系统架构、函数定义、依赖链路或接口路由时：
-  - **严禁直接全文盲目 grep 或递归遍历大文件**；
-  - **必须优先调用 `codebase-memory-mcp` 图谱工具**：
+- 探索系统架构、函数定义、依赖链路或接口路由时，**若当前会话可用 `codebase-memory-mcp` 工具，优先使用它**，避免盲目全文 grep 或递归遍历大文件：
     - `get_architecture`: 快速获取系统整体拓扑、热点与分层；
     - `search_graph`: 精准查找函数、类、结构体、接口定义；
     - `trace_path`: 追踪上下游完整调用链，评估修改带来的“爆炸半径”；
     - `get_code_snippet`: 精确读取目标源码，避免上下文爆炸。
+- **若工具不可用**（未安装或未配置 MCP），直接使用常规的文件搜索与读取，不要因此停下、报错或要求安装。
 
 ---
 
@@ -444,20 +459,21 @@ def cmd_init(target_dir):
             f.write(content)
         print(f"✨ Successfully created: {agents_path}")
 
-    # Step 3: Create compatibility symlinks (for Claude Code, Gemini, Cursor)
-    print("🔗 Ensuring cross-IDE compatibility symlinks...")
-    for alias in ["CLAUDE.md", "GEMINI.md", ".cursorrules"]:
+    # Step 3: Alias files import AGENTS.md rather than symlink it, so tools that read several rule files (e.g. Cursor) load the rules once.
+    print("🔗 Ensuring cross-IDE alias files...")
+    for alias in ["CLAUDE.md", "GEMINI.md"]:
         alias_path = os.path.join(target_dir, alias)
-        if not os.path.exists(alias_path):
-            try:
-                os.symlink("AGENTS.md", alias_path)
-                print(f"  + Created symlink: {alias} -> AGENTS.md")
-            except Exception:
-                try:
-                    shutil.copyfile(agents_path, alias_path)
-                    print(f"  + Created copy: {alias} (Windows fallback)")
-                except Exception:
-                    pass
+        legacy_link = os.path.islink(alias_path) and os.readlink(alias_path) == "AGENTS.md"
+        if legacy_link:
+            os.remove(alias_path)
+        if not os.path.lexists(alias_path):
+            with open(alias_path, "w", encoding="utf-8") as f:
+                f.write("@AGENTS.md\n")
+            print(f"  + {'Replaced symlink' if legacy_link else 'Created'}: {alias} (@AGENTS.md import)")
+    cursorrules_path = os.path.join(target_dir, ".cursorrules")
+    if os.path.islink(cursorrules_path) and os.readlink(cursorrules_path) == "AGENTS.md":
+        os.remove(cursorrules_path)
+        print("  - Removed legacy .cursorrules symlink (Cursor reads AGENTS.md natively)")
 
     # Step 4: Ensure gitignore safety
     git_ignore_path = os.path.join(target_dir, ".gitignore")

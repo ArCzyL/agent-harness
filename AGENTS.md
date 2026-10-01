@@ -22,7 +22,7 @@
 
 ***
 
-## Karpathy 防翻车四大行为准则（The 4 Golden Rules）
+## 2. Karpathy 防翻车四大行为准则（The 4 Golden Rules）
 
 ### 准则 1：【先想再写 (Think Before Writing)】
 
@@ -73,6 +73,8 @@
 
 - **文档与代码对齐检查**：`python3 bin/agent-harness check`
 
+- **自动执行**：以上三条命令写在 `.githooks/pre-commit`（改动时两处同步）。Cursor 每轮回复结束时，`.cursor/hooks.json` 的 `stop` 钩子会自动运行它，失败则把报错发回给智能体继续修复（最多 3 轮）；`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
+
 ### 文档与代码对齐（防下一会话漂移）
 
 - 下一会话会把 `AGENTS.md` 与 README / `docs/` 当作事实源。代码改了、文档没改，就会产生幻觉与架构漂移。
@@ -90,11 +92,7 @@
 
 ## 4. 代码知识图谱检索纪律 (Codebase Memory)
 
-- 探索系统架构、函数定义、依赖链路或接口路由时：
-
-  - **严禁直接全文盲目 grep 或递归遍历大文件**；
-
-  - **必须优先调用** **`codebase-memory-mcp`** **图谱工具**：
+- 探索系统架构、函数定义、依赖链路或接口路由时，**若当前会话可用 `codebase-memory-mcp` 工具，优先使用它**，避免盲目全文 grep 或递归遍历大文件：
 
     - `get_architecture`: 快速获取系统整体拓扑、热点与分层；
 
@@ -104,9 +102,17 @@
 
     - `get_code_snippet`: 精确读取目标源码，避免上下文爆炸。
 
+- **若工具不可用**（未安装或未配置 MCP），直接使用常规的文件搜索与读取，不要因此停下、报错或要求安装。
+
 ***
 
-## 5. 业务专属红线与约束（待补充）
+## 5. 业务专属红线与约束
 
-- *\[开发者自定义区域]*：可在此处记录当前项目的特定业务逻辑、私密环境配置或核心数据模型。
+- **零依赖 + Python 3.9**：`bin/agent-harness` 只用 Python 标准库，且必须能在 macOS 自带的 Python 3.9 上运行（不要用 `match`、`X | Y` 类型注解等 3.10+ 语法）。
+
+- **绝不覆盖用户内容**：`init` 遇到已存在的 `AGENTS.md` 必须跳过；`sync` 只改 `<!-- agent-harness:auto:* -->` 标记内的内容；`setup` 改写 IDE 配置时，原文件解析失败必须先生成 `.bak` 备份。
+
+- **测试隔离**：单元测试不得调用真实的 `codebase-memory-mcp`（用 stub 替换 `run_cbm_cli`），不得写入临时目录以外的路径。
+
+- **三平台**：改安装或路径逻辑时，同时考虑 macOS / Linux / Windows（`install.sh`、`install.ps1`、`bin/*.cmd`）。
 

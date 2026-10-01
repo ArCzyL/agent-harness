@@ -1,4 +1,4 @@
-## Karpathy 防翻车四大行为准则（The 4 Golden Rules）
+## 2. Karpathy 防翻车四大行为准则（The 4 Golden Rules）
 
 ### 准则 1：【先想再写 (Think Before Writing)】
 - **把假设说出口**：若需求存在两种或以上的理解，**严禁自行挑选一种闷头写代码**，必须主动向开发者指明歧义并确认；

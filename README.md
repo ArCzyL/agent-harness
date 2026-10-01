@@ -40,7 +40,7 @@ Every developer pairing with AI coding agents (Cursor, TRAE, Claude Code, Antigr
   Auto-detects your project's technology stack (Go, Rust, TypeScript, Python, etc., including Monorepos) and binds terminal test/lint commands. Forces the agent into an autonomous self-healing loop:  
   $$\text{Code} \longrightarrow \text{Run Test} \longrightarrow \text{Auto-Fix Errors} \longrightarrow \text{All Green} \longrightarrow \text{Deliver}$$
 * 🌐 **100% IDE & Client Agnostic**:
-  Automatically configures and syncs across **TRAE, Cursor, Claude Code, Antigravity, Windsurf, Zed, and VS Code**. Single source of truth via universal `AGENTS.md`, complemented by automated compatibility symlinks (`CLAUDE.md`, `GEMINI.md`, `.cursorrules`).
+  Automatically configures and syncs across **TRAE, Cursor, Claude Code, Antigravity, Windsurf, Zed, and VS Code**. Single source of truth via universal `AGENTS.md`, complemented by one-line `@AGENTS.md` import files (`CLAUDE.md`, `GEMINI.md`) instead of symlinks, so tools that read several rule files load the rules only once.
 * 🛡️ **Zero-Cloud Leakage**:
   100% local execution. Automatically configures global and project-level `.gitignore` to prevent any local database or graph artifacts from polluting private GitHub repos.
 
@@ -84,7 +84,7 @@ Open **TRAE**, **Cursor**, **Claude Code**, or **Antigravity** in that project a
 1. **Zero Overwrite Safety**: If you already have hand-crafted rules in `AGENTS.md`, it **never** overwrites them.
 2. **AST Architectural Scan**: Parses languages, modules, and entry points into the local knowledge graph (with directory-level fallback).
 3. **Tailor-Made `AGENTS.md`**: Generates a project-specific specification with your stack's exact test harness and Karpathy rules.
-4. **Universal Symlink Sync**: Creates compatibility pointers (`CLAUDE.md`, `GEMINI.md`, `.cursorrules`) linking to `AGENTS.md`.
+4. **Universal Import Sync**: Creates `CLAUDE.md` / `GEMINI.md` containing only `@AGENTS.md`; symlinks left by older versions (including `.cursorrules`) are migrated automatically.
 
 ### Keep docs aligned (before you call the task done)
 
@@ -116,8 +116,8 @@ agent-harness sync           # refresh <!-- agent-harness:auto:* --> fields only
 | :--- | :--- | :--- |
 | **TRAE** | `~/Library/Application Support/TRAE SOLO CN/User/mcp.json` | Native `AGENTS.md` context toggle |
 | **Antigravity / Gemini** | `~/.gemini/config/mcp_config.json` | Native `AGENTS.md` + `~/.gemini/GEMINI.md` |
-| **Cursor** | `~/.cursor/mcp.json` | `.cursorrules` / `.cursor/rules/` symlink |
-| **Claude Code** | `~/.claude.json` | `CLAUDE.md` symlink |
+| **Cursor** | `~/.cursor/mcp.json` | Native `AGENTS.md` |
+| **Claude Code** | `~/.claude.json` | `CLAUDE.md` imports `@AGENTS.md` |
 | **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | `AGENTS.md` integration |
 | **Zed / VS Code** | Standard JSON configuration | Native `AGENTS.md` support |
 

@@ -44,7 +44,7 @@
   自动嗅探项目技术栈（Go, Rust, TypeScript/Node, Python 等，含 Monorepo 多栈支持），自动绑定终端编译与测试命令。强制 AI 进入自动化自愈闭环：  
   $$\text{编写/修改代码} \longrightarrow \text{运行测试命令} \longrightarrow \text{根据报错自行修复} \longrightarrow \text{全部绿灯通过} \longrightarrow \text{交付开发者}$$
 * 🌐 **100% 跨开发工具（IDE-Agnostic）**：
-  一套配置，全网通用。自动适配 **TRAE、Cursor、Claude Code、Antigravity、Windsurf、Zed、VS Code**。以 `AGENTS.md` 为唯一事实源，并自动创建 `CLAUDE.md`、`GEMINI.md`、`.cursorrules` 等符号链接兼容各家工具生态。
+  一套配置，全网通用。自动适配 **TRAE、Cursor、Claude Code、Antigravity、Windsurf、Zed、VS Code**。以 `AGENTS.md` 为唯一事实源，并自动生成只含一行 `@AGENTS.md` 引用的 `CLAUDE.md`、`GEMINI.md` 兼容各家工具生态（不用软链接，避免同时读取多个规则文件的工具重复加载）。
 * 🛡️ **私有仓库零泄露保护**：
   100% 本地运算，不上传任何私有代码。自动配置全局与项目级 `.gitignore`，确保本地图谱数据库绝不会误推到 GitHub 私密仓库。
 
@@ -88,7 +88,7 @@ agent-harness init .
 1. **防误覆盖保护**：若项目根目录下已有你精心编写的 `AGENTS.md`，**绝对跳过生成**，保护既有手写规则与业务红线；
 2. **AST 架构自省**：自动解析项目主要语言比例、模块目录与 main 入口点并存入知识图谱（带目录扫描 Fallback）；
 3. **定制化生成 `AGENTS.md`**：自动根据技术栈填入专属的测试命令（Harness）与 Karpathy 四大纪律；
-4. **跨工具软链接同步**：自动生成 `CLAUDE.md -> AGENTS.md` 等符号链接，确保无论用哪款工具打开都 100% 生效。
+4. **跨工具引用同步**：自动生成只含 `@AGENTS.md` 一行的 `CLAUDE.md` / `GEMINI.md`，规则只维护一份、只加载一次；旧版本生成的软链接（含 `.cursorrules`）会自动迁移。
 
 ### 交付前必须对齐文档（防止下一会话幻觉）
 
@@ -109,7 +109,7 @@ agent-harness sync           # 只刷新 <!-- agent-harness:auto:* --> 托管字
 | **架构查询延迟** | 数秒至十几秒 | **< 1 毫秒** |
 | **代码过度设计与架构漂移** | 频繁（随意添加复杂设计模式） | **被 Karpathy 准则 2 严格拦截** |
 | **交付未测试的暗坑 Bug** | 家常便饭（空口凭感觉说修好了） | **被自动化测试 Harness 物理围栏锁死** |
-| **多 IDE 规则割裂与重复维护** | 严重（各个编辑器规则格式互不通用） | **统一以 AGENTS.md 为准，全自动软链兼容** |
+| **多 IDE 规则割裂与重复维护** | 严重（各个编辑器规则格式互不通用） | **统一以 AGENTS.md 为准，全自动引用兼容** |
 | **私密代码外泄风险** | 存在（若依赖外部第三方云检索平台） | **绝对零泄露（100% 本地 SQLite 图谱）** |
 
 ---
@@ -120,8 +120,8 @@ agent-harness sync           # 只刷新 <!-- agent-harness:auto:* --> 托管字
 | :--- | :--- | :--- |
 | **TRAE** | `~/Library/Application Support/TRAE SOLO CN/User/mcp.json` | 原生识别 `AGENTS.md` |
 | **Antigravity / Gemini** | `~/.gemini/config/mcp_config.json` | 原生识别 `AGENTS.md` 与全局 `GEMINI.md` |
-| **Cursor** | `~/.cursor/mcp.json` | 自动软链接 `.cursorrules` / `.cursor/rules/` |
-| **Claude Code** | `~/.claude.json` | 自动软链接 `CLAUDE.md` |
+| **Cursor** | `~/.cursor/mcp.json` | 原生识别 `AGENTS.md` |
+| **Claude Code** | `~/.claude.json` | `CLAUDE.md` 引用 `@AGENTS.md` |
 | **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | 自动读取 `AGENTS.md` |
 | **Zed / VS Code** | 标准配置路径 | 原生识别 `AGENTS.md` |
 
