@@ -59,7 +59,10 @@ def failing_output():
     return "\n".join(res.stdout.splitlines()[-60:])
 
 
-if event.get("status") in ("aborted", "error") or event.get("terminationReason", "model_stop") != "model_stop":
+# Antigravity's docs say "model_stop" but real runs send "NO_TOOL_CALL", so only skip clearly abnormal endings
+reason = event.get("terminationReason", "").lower()
+if event.get("status") in ("aborted", "error") or event.get("error") or any(
+        word in reason for word in ("error", "cancel", "abort", "max_steps")):
     finish()
 
 failure = failing_output()

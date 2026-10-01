@@ -459,5 +459,49 @@ class TestDocAlignment(unittest.TestCase):
             self.assertEqual(f.read(), secret)
 
 
+class TestAgentStopHook(unittest.TestCase):
+    """Runs a copy of .githooks/agent-stop.py in a temp dir with a dirty fake git and always-failing checks."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        hooks_dir = os.path.join(self.test_dir, ".githooks")
+        os.makedirs(hooks_dir)
+        shutil.copy(os.path.join(SCRIPT_DIR, "..", ".githooks", "agent-stop.py"), hooks_dir)
+        with open(os.path.join(hooks_dir, "pre-commit"), "w") as f:
+            f.write("#!/bin/sh\necho 'FAIL: probe'\nexit 1\n")
+        self.fake_bin = os.path.join(self.test_dir, "fake-bin")
+        os.makedirs(self.fake_bin)
+        fake_git = os.path.join(self.fake_bin, "git")
+        with open(fake_git, "w") as f:
+            f.write("#!/bin/sh\necho '?? dirty.txt'\n")
+        os.chmod(fake_git, 0o755)
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def run_hook(self, event):
+        import json
+        import subprocess
+        res = subprocess.run(
+            [sys.executable, os.path.join(self.test_dir, ".githooks", "agent-stop.py")],
+            input=json.dumps(event), capture_output=True, text=True,
+            env=dict(os.environ, TMPDIR=self.test_dir, PATH=self.fake_bin + os.pathsep + os.environ["PATH"]),
+        )
+        return json.loads(res.stdout)
+
+    def test_antigravity_normal_stop_reasons_trigger_verification(self):
+        # Docs show "model_stop"; real Antigravity runs send "NO_TOOL_CALL"
+        for reason in ["model_stop", "NO_TOOL_CALL"]:
+            out = self.run_hook({"conversationId": reason, "terminationReason": reason, "executionNum": 0})
+            self.assertEqual(out.get("decision"), "continue", reason)
+            self.assertIn("FAIL: probe", out.get("reason", ""))
+
+    def test_antigravity_error_stop_is_left_alone(self):
+        for event in [{"terminationReason": "error", "error": "boom"},
+                      {"terminationReason": "max_steps_exceeded", "error": ""}]:
+            event["conversationId"] = "c"
+            self.assertEqual(self.run_hook(event), {}, event)
+
+
 if __name__ == "__main__":
     unittest.main()
