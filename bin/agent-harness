@@ -13,7 +13,7 @@ import re
 import webbrowser
 import shutil
 
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 
 if sys.platform == "win32":
     CBM_BIN = os.path.expanduser("~/.local/bin/codebase-memory-mcp.exe")
@@ -34,6 +34,8 @@ def print_help():
     print(f"Version: {VERSION}\n")
     print("Usage:")
     print("  agent-harness init [path]    Index codebase & bootstrap tailor-made AGENTS.md")
+    print("  agent-harness check [path]   Verify AGENTS.md matches repo stack, entry points, tests")
+    print("  agent-harness sync [path]    Refresh marker-managed facts in AGENTS.md (keeps custom rules)")
     print("  agent-harness setup          Auto-configure MCP & rules across all installed AI IDEs")
     print("  agent-harness status         Show codebase memory daemon & indexed projects status")
     print("  agent-harness ui             Open the 3D Knowledge Graph UI in browser (localhost:9749)")
@@ -180,20 +182,21 @@ def parse_architecture(arch_res, target_dir):
         for ce in common_entries:
             if os.path.isfile(os.path.join(target_dir, ce)):
                 entry_points.append(ce)
+        bin_dir = os.path.join(target_dir, "bin")
+        if os.path.isdir(bin_dir):
+            for fname in sorted(os.listdir(bin_dir)):
+                if fname.startswith(".") or fname.endswith((".cmd", ".bat", ".ps1")):
+                    continue
+                fpath = os.path.join(bin_dir, fname)
+                if os.path.isfile(fpath):
+                    rel = "bin/" + fname
+                    if rel not in entry_points:
+                        entry_points.append(rel)
 
     return languages_str, entry_points
 
-def detect_test_harness(project_dir):
-    """
-    Detects test commands and build tools based on files in project_dir.
-    Supports multi-stack monorepos (e.g. Go backend + TS frontend, or Rust core + Python bindings).
-    """
-    harness = []
-    
-    has_rust = os.path.exists(os.path.join(project_dir, "Cargo.toml"))
-    has_go = os.path.exists(os.path.join(project_dir, "go.mod"))
-    has_node = os.path.exists(os.path.join(project_dir, "package.json"))
-    # Check Python indicators (supports bare Python projects, setup.py, scripts, and tests/)
+def detect_stacks(project_dir):
+    """Filesystem signals used by harness synthesis and AGENTS.md alignment checks."""
     has_python = (
         os.path.exists(os.path.join(project_dir, "pyproject.toml")) or
         os.path.exists(os.path.join(project_dir, "requirements.txt")) or
@@ -204,20 +207,34 @@ def detect_test_harness(project_dir):
         (os.path.isdir(os.path.join(project_dir, "tests")) and any(f.endswith(".py") for f in os.listdir(os.path.join(project_dir, "tests")))) or
         (os.path.isdir(os.path.join(project_dir, "bin")) and any(os.path.isfile(os.path.join(project_dir, "bin", f)) for f in os.listdir(os.path.join(project_dir, "bin"))))
     )
+    return {
+        "rust": os.path.exists(os.path.join(project_dir, "Cargo.toml")),
+        "go": os.path.exists(os.path.join(project_dir, "go.mod")),
+        "node": os.path.exists(os.path.join(project_dir, "package.json")),
+        "python": has_python,
+    }
 
-    if has_rust:
+def detect_test_harness(project_dir):
+    """
+    Detects test commands and build tools based on files in project_dir.
+    Supports multi-stack monorepos (e.g. Go backend + TS frontend, or Rust core + Python bindings).
+    """
+    harness = []
+    stacks = detect_stacks(project_dir)
+
+    if stacks["rust"]:
         harness.append("- **Rust 编译与测试**：`cargo check && cargo test`")
         harness.append("- **Rust 代码质量 (Clippy)**：`cargo clippy --all-targets -- -D warnings`")
 
-    if has_go:
+    if stacks["go"]:
         harness.append("- **Go 编译与单元测试**：`go build ./... && go test -v ./...`")
         harness.append("- **Go 静态代码检查 (Vet)**：`go vet ./...`")
 
-    if has_node:
+    if stacks["node"]:
         harness.append("- **Node/TS 类型与测试**：`npx tsc --noEmit && npm test` (或 `pnpm test` / `bun test`)")
         harness.append("- **Node/TS 代码风格 (Lint)**：`npm run lint`")
 
-    if has_python:
+    if stacks["python"]:
         has_pytest = (
             os.path.exists(os.path.join(project_dir, "pytest.ini")) or
             os.path.exists(os.path.join(project_dir, "conftest.py"))
@@ -232,7 +249,103 @@ def detect_test_harness(project_dir):
         harness.append("- **测试验证**：`# 请在此填入该技术栈的单元测试命令（如 pytest / go test / npm test）`")
         harness.append("- **构建检查**：`# 请在此填入该技术栈的构建/语法检查命令`")
 
+    harness.append("- **文档与代码对齐检查**：`agent-harness check`")
     return "\n".join(harness)
+
+AUTO_MARK = "agent-harness:auto:{name}"
+
+DOC_ALIGNMENT_SECTION = """### 文档与代码对齐（防下一会话漂移）
+- 下一会话会把 `AGENTS.md` 与 README / `docs/` 当作事实源。代码改了、文档没改，就会产生幻觉与架构漂移。
+- **必须同步文档**：对外行为、CLI/API、入口点、技术栈、测试命令、架构分层。
+- **不必改文档**：不改变上述事实的纯内部实现。
+- 交付前运行 `agent-harness check`。带 `<!-- agent-harness:auto:* -->` 标记的字段可用 `agent-harness sync` 刷新。**sync 不会修改第 5 节业务红线。**
+"""
+
+def format_entry_points_md(entry_points):
+    if entry_points:
+        return "\n".join(["- `{0}`".format(ep) for ep in entry_points[:10]])
+    return "- 暂无显式 main 入口（待开发定义）"
+
+def wrap_auto(name, inner):
+    start = "<!-- " + AUTO_MARK.format(name=name) + " -->"
+    end = "<!-- /" + AUTO_MARK.format(name=name) + " -->"
+    return start + inner + end
+
+def replace_auto_block(content, name, inner):
+    start = "<!-- " + AUTO_MARK.format(name=name) + " -->"
+    end = "<!-- /" + AUTO_MARK.format(name=name) + " -->"
+    pattern = re.compile(re.escape(start) + r".*?" + re.escape(end), re.DOTALL)
+    replacement = start + inner + end
+    new_content, n = pattern.subn(replacement, content, count=1)
+    return new_content, n > 0
+
+def alignment_issues(target_dir):
+    """Return human-readable mismatches between repo facts and AGENTS.md. Empty means aligned."""
+    issues = []
+    agents_path = os.path.join(target_dir, "AGENTS.md")
+    if not os.path.isfile(agents_path):
+        return ["缺少 AGENTS.md，请先运行 `agent-harness init`"]
+
+    with open(agents_path, "r", encoding="utf-8", errors="ignore") as f:
+        text = f.read()
+    text_l = text.lower()
+
+    languages_str, entry_points = parse_architecture(None, target_dir)
+    skip_langs = {"自动检测 / 多语言", "自动检测", "多语言"}
+    for lang in [part.strip() for part in languages_str.split(",") if part.strip()]:
+        if lang in skip_langs:
+            continue
+        if lang not in text:
+            issues.append("仓库含 {0} 代码，但 AGENTS.md 未记录该语言".format(lang))
+
+    for ep in entry_points:
+        if ep not in text:
+            issues.append("入口点 `{0}` 存在于仓库，但 AGENTS.md 未列出".format(ep))
+
+    stacks = detect_stacks(target_dir)
+    stack_needles = [
+        ("rust", ["cargo"], "Cargo.toml"),
+        ("go", ["go test"], "go.mod"),
+        ("node", ["npm test", "pnpm test", "yarn test", "bun test"], "package.json"),
+        ("python", ["unittest", "pytest"], "Python 工程"),
+    ]
+    for key, needles, label in stack_needles:
+        if stacks.get(key) and not any(needle.lower() in text_l for needle in needles):
+            issues.append("检测到 {0}，但 AGENTS.md 未包含对应测试命令（{1}）".format(label, " / ".join(needles)))
+
+    return issues
+
+def working_tree_undocumented_warning(target_dir):
+    git_meta = os.path.join(target_dir, ".git")
+    if not os.path.exists(git_meta):
+        return None
+    res = subprocess.run(
+        ["git", "diff", "--name-only", "HEAD"],
+        cwd=target_dir,
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0:
+        return None
+    files = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+    code_exts = {
+        ".py", ".go", ".rs", ".ts", ".tsx", ".js", ".jsx", ".java",
+        ".c", ".cpp", ".h", ".rb", ".php", ".swift", ".kt",
+    }
+    code_changed = False
+    docs_changed = False
+    for rel in files:
+        ext = os.path.splitext(rel)[1].lower()
+        if ext == ".md":
+            docs_changed = True
+        elif ext in code_exts or rel.startswith("bin/"):
+            code_changed = True
+    if code_changed and not docs_changed:
+        return (
+            "工作区有代码改动但没有任何 Markdown 文档改动。"
+            "若涉及对外行为 / 入口点 / 测试命令 / 公共 API，请同步更新 AGENTS.md 与 README/docs。"
+        )
+    return None
 
 def cmd_init(target_dir):
     target_dir = os.path.abspath(target_dir)
@@ -262,6 +375,7 @@ def cmd_init(target_dir):
     if os.path.exists(agents_path):
         print(f"🛡️  AGENTS.md already exists at: {agents_path}")
         print("⏭️  Skipping creation to protect existing rules from being overwritten.")
+        print("💡 若技术栈或测试命令已变，运行 `agent-harness sync` 刷新带标记的事实字段；交付前运行 `agent-harness check`。")
     else:
         # Step 2: Query architecture
         print("🔍 Inspecting codebase architecture & language breakdown...")
@@ -272,7 +386,7 @@ def cmd_init(target_dir):
         languages_str, entry_points = parse_architecture(arch_res, target_dir)
         harness_md = detect_test_harness(target_dir)
         karpathy_rules_md = load_karpathy_rules()
-        entry_points_md = "\n".join([f"- `{ep}`" for ep in entry_points[:10]]) if entry_points else "- 暂无显式 main 入口（待开发定义）"
+        entry_points_md = format_entry_points_md(entry_points)
 
         print("📝 Synthesizing tailor-made AGENTS.md (Karpathy Rules + Test Harness)...")
         content = f"""# {project_name} AI 智能体开发规范与项目指令 (AGENTS.md)
@@ -286,9 +400,9 @@ def cmd_init(target_dir):
 
 ## 1. 核心技术栈与架构基线
 - **项目名称**：`{project_name}`
-- **主要技术栈 / 语言**：{languages_str}
+- **主要技术栈 / 语言**：{wrap_auto("languages", languages_str)}
 - **核心入口点 (Entry Points)**：
-{entry_points_md}
+{wrap_auto("entries", chr(10) + entry_points_md + chr(10))}
 
 ---
 
@@ -302,11 +416,13 @@ def cmd_init(target_dir):
 > `编写/修改代码` $\\to$ `运行检查命令` $\\to$ `根据报错自愈修复` $\\to$ `重新运行测试` $\\to$ `全部绿灯后交付`。
 
 ### 本项目测试与校验命令：
-{harness_md}
+{wrap_auto("harness", chr(10) + harness_md + chr(10))}
 
+{DOC_ALIGNMENT_SECTION}
 **闭环铁律**：
 1. 若测试或编译报错，智能体必须读取具体报错栈并自行修复，严禁在未通过测试时宣告任务完成；
 2. 若连续修复 3 次仍无法解决底层依赖或设计阻塞，必须**主动停下来汇报具体卡点**，严禁进入无限盲目试错死循环。
+3. 若改动改变了对外行为、入口点、技术栈或测试命令，必须同步更新 AGENTS.md（及 README / docs 对应描述），并运行 `agent-harness check` 直至通过。
 
 ---
 
@@ -354,6 +470,76 @@ def cmd_init(target_dir):
             print("🛡️  Added .codebase-memory/ to project .gitignore")
 
     print(f"\n🎉 [agent-harness] Ready! You can now start chatting with AI in any tool (TRAE, Cursor, Claude Code, Antigravity).\n")
+
+def cmd_check(target_dir):
+    target_dir = os.path.abspath(target_dir)
+    if not os.path.isdir(target_dir):
+        print(f"❌ Error: {target_dir} is not a valid directory.")
+        sys.exit(1)
+
+    warn = working_tree_undocumented_warning(target_dir)
+    if warn:
+        print("⚠️  {0}\n".format(warn))
+
+    issues = alignment_issues(target_dir)
+    if issues:
+        print("❌ AGENTS.md 与仓库事实不对齐（会导致下一会话幻觉）：\n")
+        for item in issues:
+            print("  - {0}".format(item))
+        print("\n修复：更新 AGENTS.md，或给托管字段加上 `<!-- agent-harness:auto:* -->` 后运行 `agent-harness sync`。")
+        sys.exit(1)
+
+    print("✅ AGENTS.md 与仓库技术栈 / 入口点 / 测试命令对齐。")
+
+def cmd_sync(target_dir):
+    target_dir = os.path.abspath(target_dir)
+    if not os.path.isdir(target_dir):
+        print(f"❌ Error: {target_dir} is not a valid directory.")
+        sys.exit(1)
+
+    agents_path = os.path.join(target_dir, "AGENTS.md")
+    if not os.path.isfile(agents_path):
+        print("❌ 缺少 AGENTS.md，请先运行 `agent-harness init`。")
+        sys.exit(1)
+
+    languages_str, entry_points = parse_architecture(None, target_dir)
+    harness_md = detect_test_harness(target_dir)
+    entry_points_md = format_entry_points_md(entry_points)
+
+    with open(agents_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    original = content
+
+    updates = []
+    skipped = []
+    content, ok = replace_auto_block(content, "languages", languages_str)
+    (updates if ok else skipped).append("languages")
+    content, ok = replace_auto_block(content, "entries", "\n" + entry_points_md + "\n")
+    (updates if ok else skipped).append("entries")
+    content, ok = replace_auto_block(content, "harness", "\n" + harness_md + "\n")
+    (updates if ok else skipped).append("harness")
+
+    if not updates:
+        print("❌ AGENTS.md 中没有 `agent-harness:auto:*` 标记，拒绝改写手写文档。")
+        print("   新项目请用当前版本 `agent-harness init`；已有文档可把要托管的段落包进标记后再 sync。")
+        sys.exit(1)
+
+    if content != original:
+        with open(agents_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print("✨ 已刷新 AGENTS.md 自动托管字段：{0}。第 5 节业务红线未改。".format(", ".join(updates)))
+    else:
+        print("✅ 自动托管字段已是最新：{0}。".format(", ".join(updates)))
+
+    if skipped:
+        print("⏭️  无标记字段已跳过（手写保护）：{0}".format(", ".join(skipped)))
+
+    issues = alignment_issues(target_dir)
+    if issues:
+        print("⚠️  刷新后仍有缺口，请手工补全：")
+        for item in issues:
+            print("  - {0}".format(item))
+        sys.exit(1)
 
 def safe_inject_mcp(target_path, ide_name):
     """Safely injects codebase-memory-mcp into an IDE's JSON configuration with corruption backup."""
@@ -468,6 +654,12 @@ def main():
     if subcmd == "init":
         target = sys.argv[2] if len(sys.argv) > 2 else "."
         cmd_init(target)
+    elif subcmd == "check":
+        target = sys.argv[2] if len(sys.argv) > 2 else "."
+        cmd_check(target)
+    elif subcmd == "sync":
+        target = sys.argv[2] if len(sys.argv) > 2 else "."
+        cmd_sync(target)
     elif subcmd == "setup":
         cmd_setup()
     elif subcmd == "status":

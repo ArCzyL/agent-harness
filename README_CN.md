@@ -90,6 +90,15 @@ agent-harness init .
 3. **定制化生成 `AGENTS.md`**：自动根据技术栈填入专属的测试命令（Harness）与 Karpathy 四大纪律；
 4. **跨工具软链接同步**：自动生成 `CLAUDE.md -> AGENTS.md` 等符号链接，确保无论用哪款工具打开都 100% 生效。
 
+### 交付前必须对齐文档（防止下一会话幻觉）
+
+下一会话会把 `AGENTS.md` / README 当作事实。代码改了、文档没改，下一窗口就会漂。
+
+```bash
+agent-harness check          # 技术栈、入口点、测试命令与 AGENTS.md 不一致则失败
+agent-harness sync           # 只刷新 <!-- agent-harness:auto:* --> 托管字段，不动第 5 节业务红线
+```
+
 ---
 
 ## 📊 实测效益对比

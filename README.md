@@ -86,6 +86,15 @@ Open **TRAE**, **Cursor**, **Claude Code**, or **Antigravity** in that project a
 3. **Tailor-Made `AGENTS.md`**: Generates a project-specific specification with your stack's exact test harness and Karpathy rules.
 4. **Universal Symlink Sync**: Creates compatibility pointers (`CLAUDE.md`, `GEMINI.md`, `.cursorrules`) linking to `AGENTS.md`.
 
+### Keep docs aligned (before you call the task done)
+
+The next chat session will treat `AGENTS.md` / README as ground truth. If code moved and docs did not, the next agent hallucinates.
+
+```bash
+agent-harness check          # fail if stack, entry points, or test commands drifted
+agent-harness sync           # refresh <!-- agent-harness:auto:* --> fields only; never touches section 5
+```
+
 ---
 
 ## 📊 Comparison

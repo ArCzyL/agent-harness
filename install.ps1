@@ -97,6 +97,7 @@ How to use:
   1. cd C:\path\to\your\project
   2. agent-harness init .
   3. Open project in TRAE, Cursor, Claude Code, or Antigravity!
+  4. Before delivery: agent-harness check   (agent-harness sync if stack facts drifted)
 
 Or in AI chat, simply say: '为当前项目建图并初始化开发规范'
 " -ForegroundColor Green

@@ -79,6 +79,13 @@ class TestTestHarnessDetection(unittest.TestCase):
         
         res = ah.detect_test_harness(self.test_dir)
         self.assertIn("unittest", res)
+        self.assertIn("agent-harness check", res)
+
+    def test_harness_always_includes_doc_alignment_check(self):
+        with open(os.path.join(self.test_dir, "Cargo.toml"), "w") as f:
+            f.write("[package]\nname = 'test'\n")
+        res = ah.detect_test_harness(self.test_dir)
+        self.assertIn("agent-harness check", res)
 
 class TestTemplateAndArchitectureParsing(unittest.TestCase):
     def setUp(self):
@@ -104,6 +111,17 @@ class TestTemplateAndArchitectureParsing(unittest.TestCase):
         langs, entries = ah.parse_architecture(None, self.test_dir)
         self.assertTrue("Rust" in langs or "Python" in langs)
         self.assertIn("main.rs", entries)
+
+    def test_bin_script_entry_point_fallback(self):
+        bin_dir = os.path.join(self.test_dir, "bin")
+        os.makedirs(bin_dir)
+        with open(os.path.join(bin_dir, "agent-harness"), "w") as f:
+            f.write("#!/usr/bin/env python3\n")
+        with open(os.path.join(bin_dir, "agent-harness.cmd"), "w") as f:
+            f.write("@echo off\n")
+        langs, entries = ah.parse_architecture(None, self.test_dir)
+        self.assertIn("bin/agent-harness", entries)
+        self.assertNotIn("bin/agent-harness.cmd", entries)
 
     def test_extract_json_payload_with_noisy_logs(self):
         # Simulates CBM output with fake bracket in log message, valid JSON payload, and trailing log
@@ -179,6 +197,83 @@ class TestInitExecutionAndSafety(unittest.TestCase):
         with open(mcp_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         self.assertIn("codebase-memory-mcp", data["mcpServers"])
+
+
+class TestDocAlignment(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.orig_run_cbm_cli = ah.run_cbm_cli
+        ah.run_cbm_cli = lambda args: {"project": "mock-test-project", "nodes": 0, "edges": 0}
+
+    def tearDown(self):
+        ah.run_cbm_cli = self.orig_run_cbm_cli
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def test_init_embeds_auto_markers_and_doc_rule(self):
+        ah.cmd_init(self.test_dir)
+        with open(os.path.join(self.test_dir, "AGENTS.md"), "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("agent-harness:auto:languages", content)
+        self.assertIn("agent-harness:auto:entries", content)
+        self.assertIn("agent-harness:auto:harness", content)
+        self.assertIn("文档与代码对齐", content)
+        self.assertIn("agent-harness check", content)
+
+    def test_check_missing_agents_md(self):
+        issues = ah.alignment_issues(self.test_dir)
+        self.assertTrue(any("AGENTS.md" in item for item in issues))
+
+    def test_check_detects_language_and_harness_drift(self):
+        with open(os.path.join(self.test_dir, "Cargo.toml"), "w") as f:
+            f.write("[package]\nname = 'test'\n")
+        with open(os.path.join(self.test_dir, "main.rs"), "w") as f:
+            f.write("fn main() {}\n")
+        ah.cmd_init(self.test_dir)
+        self.assertEqual(ah.alignment_issues(self.test_dir), [])
+
+        agents_path = os.path.join(self.test_dir, "AGENTS.md")
+        with open(agents_path, "r", encoding="utf-8") as f:
+            content = f.read().replace("Rust", "Nope").replace("cargo", "nope")
+        with open(agents_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        issues = ah.alignment_issues(self.test_dir)
+        self.assertTrue(any("Rust" in item for item in issues))
+        self.assertTrue(any("Cargo.toml" in item for item in issues))
+
+    def test_sync_refreshes_marked_fields_and_preserves_custom_rules(self):
+        with open(os.path.join(self.test_dir, "Cargo.toml"), "w") as f:
+            f.write("[package]\nname = 'test'\n")
+        ah.cmd_init(self.test_dir)
+
+        agents_path = os.path.join(self.test_dir, "AGENTS.md")
+        with open(agents_path, "a", encoding="utf-8") as f:
+            f.write("\n- KEEPME-CUSTOM-RULE\n")
+
+        with open(os.path.join(self.test_dir, "go.mod"), "w") as f:
+            f.write("module test\n")
+        ah.cmd_sync(self.test_dir)
+
+        with open(agents_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("KEEPME-CUSTOM-RULE", content)
+        self.assertIn("go test", content)
+        self.assertIn("cargo test", content)
+        self.assertEqual(ah.alignment_issues(self.test_dir), [])
+
+    def test_sync_refuses_to_rewrite_unmarked_handwritten_docs(self):
+        agents_path = os.path.join(self.test_dir, "AGENTS.md")
+        secret = "# MY HAND-CRAFTED RULES - DO NOT OVERWRITE\n"
+        with open(agents_path, "w", encoding="utf-8") as f:
+            f.write(secret)
+
+        with self.assertRaises(SystemExit) as cm:
+            ah.cmd_sync(self.test_dir)
+        self.assertEqual(cm.exception.code, 1)
+
+        with open(agents_path, "r", encoding="utf-8") as f:
+            self.assertEqual(f.read(), secret)
+
 
 if __name__ == "__main__":
     unittest.main()

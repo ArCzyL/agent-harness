@@ -26,6 +26,8 @@ The framework consists of three tightly coupled, lightweight layers:
 │               Layer 2: Universal Harness CLI & Generator               │
 │                        bin/agent-harness                               │
 │           ├── init: Graph Indexing + Tailored AGENTS.md + Symlinks     │
+│           ├── check: AGENTS.md vs repo stack / entry / test commands   │
+│           ├── sync: Refresh marker-managed facts (keeps section 5)     │
 │           ├── setup: Multi-IDE MCP Auto-Configuration                  │
 │           ├── status: Healthcheck & Indexed Projects Registry          │
 │           └── ui: Browser Visualizer Launcher                          │
@@ -52,6 +54,7 @@ The framework consists of three tightly coupled, lightweight layers:
 5. **Template Assembly**: Dynamically loads `templates/karpathy_rules.md` (with embedded fallback) to compose the finalized `AGENTS.md`.
 6. **Cross-IDE Compatibility**: Creates atomic symlinks (`CLAUDE.md`, `GEMINI.md`, `.cursorrules`) pointing to `AGENTS.md` (with copy fallback for restricted Windows environments).
 7. **Git Safety Shielding**: Ensures `.codebase-memory/` and graph artifacts are excluded in `.gitignore`.
+8. If `AGENTS.md` already exists, prints a reminder to run `agent-harness check` / `sync` instead of regenerating.
 
 ### Flow B: Global Setup (`agent-harness setup`)
 1. Scans filesystem for installed client configuration targets:
@@ -63,6 +66,11 @@ The framework consists of three tightly coupled, lightweight layers:
 2. Injects or merges `codebase-memory-mcp` definition safely into each client's `mcpServers` section without overwriting other tools.
 3. Configures global Git excludes (`~/.gitignore_global`) via `git config --global core.excludesfile`.
 
+### Flow C: Doc/Code Alignment (`agent-harness check` / `sync`)
+1. **`check`**: Re-detects languages, `bin/` entry points, and stack test signals from the filesystem. Fails if `AGENTS.md` is missing those facts. Warns (does not fail) when the git working tree has code diffs but no Markdown diffs.
+2. **`sync`**: Replaces only `<!-- agent-harness:auto:languages|entries|harness -->` blocks. If no markers exist, refuses to write (zero-overwrite for hand-crafted docs). Section 5 custom invariants are never touched.
+3. New `init` output embeds those markers plus a "docs must match public behavior" clause in the test loop.
+
 ---
 
 ## 3. Design Decisions & Trade-Offs
@@ -72,4 +80,4 @@ The framework consists of three tightly coupled, lightweight layers:
 | **Runtime Language** | Python 3 Standard Library only | Zero external dependencies (`pip`/`npm`), runs out of the box on macOS, Linux, and Windows. |
 | **Memory Engine** | [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) (C / SQLite) | Single 15MB binary, sub-millisecond AST queries, 99%+ token reduction, minimal RAM footprint (<30MB). |
 | **Specification Source of Truth** | Universal `AGENTS.md` | Adopted by the Agentic AI Foundation / Linux Foundation; supported natively by modern IDEs, backward-compatible via symlinks. |
-| **Verification Loop** | Test Harness Command Invariant | Human developers cannot act as real-time code checkers; the compiler/test runner is the only objective gatekeeper. |
+| **Verification Loop** | Test Harness + `agent-harness check` | Compilers catch broken code; `check` catches stale AGENTS.md that would poison the next session. |

@@ -11,11 +11,14 @@
 
 - **项目名称**：`agent-harness`
 
-- **主要技术栈 / 语言**：Python
+- **主要技术栈 / 语言**：<!-- agent-harness:auto:languages -->Python<!-- /agent-harness:auto:languages -->
 
 - **核心入口点 (Entry Points)**：
+<!-- agent-harness:auto:entries -->
+- `bin/agent-harness`
+<!-- /agent-harness:auto:entries -->
 
-- 暂无显式 main 入口（待开发定义）
+- **CLI 子命令**：`init` · `check` · `sync` · `setup` · `status` · `ui`
 
 ***
 
@@ -68,10 +71,20 @@
 
 - **代码语法编译检查**：`python3 -m py_compile bin/agent-harness`
 
+- **文档与代码对齐检查**：`python3 bin/agent-harness check`
+
+### 文档与代码对齐（防下一会话漂移）
+
+- 下一会话会把 `AGENTS.md` 与 README / `docs/` 当作事实源。代码改了、文档没改，就会产生幻觉与架构漂移。
+- **必须同步文档**：对外行为、CLI/API、入口点、技术栈、测试命令、架构分层。
+- **不必改文档**：不改变上述事实的纯内部实现。
+- 交付前运行 `python3 bin/agent-harness check`。带 `<!-- agent-harness:auto:* -->` 标记的字段可用 `python3 bin/agent-harness sync` 刷新。**sync 不会修改第 5 节业务红线。** 本仓库的测试命令为手写，故未加 harness 标记，避免 sync 覆盖 `py_compile bin/agent-harness`。
+
 **闭环铁律**：
 
 1. 若测试或编译报错，智能体必须读取具体报错栈并自行修复，严禁在未通过测试时宣告任务完成；
 2. 若连续修复 3 次仍无法解决底层依赖或设计阻塞，必须**主动停下来汇报具体卡点**，严禁进入无限盲目试错死循环。
+3. 若改动改变了对外行为、入口点、技术栈或测试命令，必须同步更新 AGENTS.md（及 README / docs 对应描述），并运行 `python3 bin/agent-harness check` 直至通过。
 
 ***
 
