@@ -55,22 +55,41 @@ case "${OS}" in
         ;;
 esac
 
-# 2. Check / Install codebase-memory-mcp
+# 2. Install / upgrade codebase-memory-mcp to the latest official release
 CBM_BIN="${INSTALL_DIR}/codebase-memory-mcp"
-CBM_VERSION="v0.10.8"
+CBM_UPGRADED=""
+LATEST_TAG="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/DeusData/codebase-memory-mcp/releases/latest 2>/dev/null | sed -n 's#.*/tag/##p')"
+INSTALLED_TAG=""
+if [ -f "${CBM_BIN}" ]; then
+    INSTALLED_TAG="v$("${CBM_BIN}" --version 2>/dev/null | awk '/^codebase-memory-mcp /{print $2; exit}')"
+fi
 
-if [ ! -f "${CBM_BIN}" ]; then
-    echo -e "⬇️  Downloading codebase-memory-mcp engine (${CBM_VERSION})..."
-    DOWNLOAD_URL="https://github.com/DeusData/codebase-memory-mcp/releases/download/${CBM_VERSION}/${CBM_TAR}"
+if [ -n "${LATEST_TAG}" ] && [ "${LATEST_TAG}" != "${INSTALLED_TAG}" ]; then
+    echo -e "⬇️  Downloading codebase-memory-mcp engine (${LATEST_TAG})..."
+    DOWNLOAD_URL="https://github.com/DeusData/codebase-memory-mcp/releases/download/${LATEST_TAG}/${CBM_TAR}"
     TMP_DIR="$(mktemp -d)"
-    curl -sL "${DOWNLOAD_URL}" -o "${TMP_DIR}/${CBM_TAR}"
+    curl -fsSL "${DOWNLOAD_URL}" -o "${TMP_DIR}/${CBM_TAR}"
     tar -xzf "${TMP_DIR}/${CBM_TAR}" -C "${TMP_DIR}"
-    cp "${TMP_DIR}/codebase-memory-mcp" "${CBM_BIN}"
-    chmod +x "${CBM_BIN}"
+    if [ -f "${CBM_BIN}" ]; then
+        # A new engine refuses to start while any older engine process is alive
+        "${CBM_BIN}" daemon stop >/dev/null 2>&1 || true
+        pkill -f "${CBM_BIN}" 2>/dev/null || true
+        CBM_UPGRADED="${INSTALLED_TAG} -> ${LATEST_TAG}"
+    fi
+    cp "${TMP_DIR}/codebase-memory-mcp" "${CBM_BIN}.new"
+    chmod +x "${CBM_BIN}.new"
+    mv -f "${CBM_BIN}.new" "${CBM_BIN}"
     rm -rf "${TMP_DIR}"
-    echo -e "✅ Installed codebase-memory-mcp engine to ${CBM_BIN}"
+    echo -e "✅ Installed codebase-memory-mcp ${LATEST_TAG} to ${CBM_BIN}"
+elif [ -f "${CBM_BIN}" ]; then
+    if [ -n "${LATEST_TAG}" ]; then
+        echo -e "✅ codebase-memory-mcp ${INSTALLED_TAG} is already the latest release"
+    else
+        echo -e "${YELLOW}⚠️  Could not check for engine updates; keeping installed ${INSTALLED_TAG}${NC}"
+    fi
 else
-    echo -e "✅ Found existing codebase-memory-mcp at ${CBM_BIN}"
+    echo -e "${RED}❌ Could not resolve the latest codebase-memory-mcp release. Check your network and retry.${NC}"
+    exit 1
 fi
 
 # 3. Install agent-harness CLI
@@ -131,3 +150,8 @@ echo "  4. Before delivery: agent-harness check   (agent-harness sync if stack f
 echo ""
 echo "Or in AI chat, simply say: '为当前项目建图并初始化开发规范'"
 echo ""
+if [ -n "${CBM_UPGRADED}" ]; then
+    echo -e "${YELLOW}⚠️  Engine upgraded (${CBM_UPGRADED}). Restart codebase-memory-mcp in each open AI tool"
+    echo -e "   (Cursor: Settings → MCP → toggle it off/on; or restart the app) so the new engine takes over.${NC}"
+    echo ""
+fi

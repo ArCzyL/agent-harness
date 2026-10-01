@@ -66,11 +66,11 @@ def extract_json_payload(output_text):
             idx = output_text.find('{', idx + 1)
     return None
 
-def run_cbm_cli(args):
+def run_cbm_cli(tool, params=None):
     if not os.path.exists(CBM_BIN):
         return None
-    cmd = [CBM_BIN, "cli", "--json"] + args
-    res = subprocess.run(cmd, input="{}", capture_output=True, text=True)
+    cmd = [CBM_BIN, "cli", "--json", tool]
+    res = subprocess.run(cmd, input=json.dumps(params or {}), capture_output=True, text=True)
     output = res.stdout or ""
     parsed = extract_json_payload(output)
     if isinstance(parsed, dict) and isinstance(parsed.get("structuredContent"), dict):
@@ -355,13 +355,14 @@ def cmd_init(target_dir):
 
     # Step 1: Index repository
     print("⏳ Building / updating codebase knowledge graph via codebase-memory-mcp...")
-    idx_res = run_cbm_cli(["index_repository", "--repo-path", target_dir])
-    if isinstance(idx_res, dict):
-        nodes = idx_res.get("nodes", 0)
-        edges = idx_res.get("edges", 0)
-        print(f"✅ Graph indexed: {nodes} nodes, {edges} edges.")
+    idx_res = run_cbm_cli("index_repository", {"repo_path": target_dir})
+    if isinstance(idx_res, dict) and "nodes" in idx_res:
+        print(f"✅ Graph indexed: {idx_res['nodes']} nodes, {idx_res.get('edges', 0)} edges.")
+    elif not os.path.exists(CBM_BIN):
+        print("ℹ️ Graph indexing skipped (codebase-memory-mcp not installed).")
     else:
-        print("ℹ️ Graph indexing skipped (codebase-memory-mcp not installed or returned no result).")
+        print("⚠️ codebase-memory-mcp returned a result agent-harness does not understand — the engine's output "
+              "format may have changed. AGENTS.md is unaffected; update agent-harness or run with DEBUG=1 for details.")
 
     # Check if AGENTS.md already exists
     if os.path.exists(agents_path):
@@ -614,9 +615,9 @@ def cmd_status():
         return
 
     # Check daemon via run_cbm_cli
-    data = run_cbm_cli(["list_projects"])
-    if isinstance(data, dict):
-        projects = data.get("projects", [])
+    data = run_cbm_cli("list_projects", {"format": "json"})
+    if isinstance(data, dict) and isinstance(data.get("projects"), list):
+        projects = data["projects"]
         print("🟢 Knowledge Graph Engine: Running")
         print(f"📁 Indexed Projects: {len(projects)}")
         for p in projects:

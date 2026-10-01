@@ -173,21 +173,97 @@ level=info msg="finished in 0.12s"
         orig_bin = ah.CBM_BIN
         ah.CBM_BIN = fake_bin
         try:
-            res = ah.run_cbm_cli(["index_repository"])
+            res = ah.run_cbm_cli("index_repository")
         finally:
             ah.CBM_BIN = orig_bin
         self.assertEqual(res, {"project": "demo", "nodes": 33, "edges": 38})
+
+    def test_run_cbm_cli_sends_params_on_stdin(self):
+        # Engine 0.11 deprecates raw JSON as a positional argument; piped stdin is the supported form
+        fake_bin = os.path.join(self.test_dir, "fake-cbm")
+        argv_file = os.path.join(self.test_dir, "argv.txt")
+        stdin_file = os.path.join(self.test_dir, "stdin.json")
+        with open(fake_bin, "w") as f:
+            f.write(f"#!/bin/sh\necho \"$@\" > '{argv_file}'\ncat > '{stdin_file}'\n")
+            f.write("echo '{\"content\":[],\"structuredContent\":{\"ok\":true},\"isError\":false}'\n")
+        os.chmod(fake_bin, 0o755)
+        orig_bin = ah.CBM_BIN
+        ah.CBM_BIN = fake_bin
+        try:
+            res = ah.run_cbm_cli("index_repository", {"repo_path": "/tmp/demo"})
+        finally:
+            ah.CBM_BIN = orig_bin
+        import json
+        self.assertEqual(res, {"ok": True})
+        with open(argv_file) as f:
+            self.assertEqual(f.read().split(), ["cli", "--json", "index_repository"])
+        with open(stdin_file) as f:
+            self.assertEqual(json.load(f), {"repo_path": "/tmp/demo"})
+
+    def test_status_requests_json_project_list(self):
+        # Engine 0.11 prints a text table for list_projects unless format=json is requested
+        import io
+        import contextlib
+        fake_bin = os.path.join(self.test_dir, "fake-cbm")
+        open(fake_bin, "w").close()
+        calls = []
+        orig_bin, orig_run = ah.CBM_BIN, ah.run_cbm_cli
+        ah.CBM_BIN = fake_bin
+        ah.run_cbm_cli = lambda tool, params=None: calls.append((tool, params)) or {
+            "projects": [{"name": "a", "root_path": "/a"}, {"name": "b", "root_path": "/b"}]}
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                ah.cmd_status()
+        finally:
+            ah.CBM_BIN, ah.run_cbm_cli = orig_bin, orig_run
+        self.assertEqual(calls, [("list_projects", {"format": "json"})])
+        self.assertIn("Indexed Projects: 2", out.getvalue())
+
+        ah.CBM_BIN = fake_bin
+        ah.run_cbm_cli = lambda tool, params=None: {"content": [{"type": "text", "text": "projects: 2"}]}
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                ah.cmd_status()
+        finally:
+            ah.CBM_BIN, ah.run_cbm_cli = orig_bin, orig_run
+        self.assertNotIn("Indexed Projects: 0", out.getvalue())
+        self.assertIn("⚠️", out.getvalue())
 
 class TestInitExecutionAndSafety(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
         # Stub run_cbm_cli so unit tests are isolated and never register temp test dirs into CBM daemon
         self.orig_run_cbm_cli = ah.run_cbm_cli
-        ah.run_cbm_cli = lambda args: {"project": "mock-test-project", "nodes": 0, "edges": 0}
+        ah.run_cbm_cli = lambda tool, params=None: {"project": "mock-test-project", "nodes": 0, "edges": 0}
 
     def tearDown(self):
         ah.run_cbm_cli = self.orig_run_cbm_cli
         shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def test_init_indexes_repo_path(self):
+        calls = []
+        ah.run_cbm_cli = lambda tool, params=None: calls.append((tool, params)) or {"project": "p", "nodes": 1, "edges": 0}
+        ah.cmd_init(self.test_dir)
+        self.assertEqual(calls[0], ("index_repository", {"repo_path": os.path.abspath(self.test_dir)}))
+
+    def test_init_warns_loudly_on_unrecognized_engine_output(self):
+        import io
+        import contextlib
+        fake_bin = os.path.join(self.test_dir, "fake-cbm")
+        open(fake_bin, "w").close()
+        orig_bin = ah.CBM_BIN
+        ah.CBM_BIN = fake_bin
+        ah.run_cbm_cli = lambda tool, params=None: {"some_future_shape": True}
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                ah.cmd_init(self.test_dir)
+        finally:
+            ah.CBM_BIN = orig_bin
+        self.assertIn("⚠️", out.getvalue())
+        self.assertNotIn("Graph indexed: 0 nodes", out.getvalue())
 
     def test_zero_overwrite_protection(self):
         agents_path = os.path.join(self.test_dir, "AGENTS.md")
@@ -276,7 +352,7 @@ class TestDocAlignment(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
         self.orig_run_cbm_cli = ah.run_cbm_cli
-        ah.run_cbm_cli = lambda args: {"project": "mock-test-project", "nodes": 0, "edges": 0}
+        ah.run_cbm_cli = lambda tool, params=None: {"project": "mock-test-project", "nodes": 0, "edges": 0}
 
     def tearDown(self):
         ah.run_cbm_cli = self.orig_run_cbm_cli
@@ -311,8 +387,8 @@ class TestDocAlignment(unittest.TestCase):
         # The graph's notion of entry points differs from check's filesystem rules; init must follow check
         arch_text = ("languages: 1  (cols: language files)\n  TypeScript 2\n"
                      "entry_points: 1  (cols: qn file)\n  demo.src.api.users.getUser src/api/users.ts\n")
-        ah.run_cbm_cli = lambda args: (
-            {"content": [{"type": "text", "text": arch_text}]} if args[0] == "get_architecture"
+        ah.run_cbm_cli = lambda tool, params=None: (
+            {"content": [{"type": "text", "text": arch_text}]} if tool == "get_architecture"
             else {"project": "demo", "nodes": 33, "edges": 38}
         )
         os.makedirs(os.path.join(self.test_dir, "src", "api"))
