@@ -243,6 +243,18 @@ class TestInitExecutionAndSafety(unittest.TestCase):
             data = json.load(f)
         self.assertIn("codebase-memory-mcp", data["mcpServers"])
 
+    def test_safe_inject_mcp_treats_empty_file_as_new_config(self):
+        # Antigravity ships ~/.gemini/config/mcp_config.json as a 0-byte file
+        mcp_path = os.path.join(self.test_dir, "mcp_config.json")
+        open(mcp_path, "w").close()
+
+        ah.safe_inject_mcp(mcp_path, "Antigravity")
+
+        self.assertFalse(os.path.exists(mcp_path + ".bak"))
+        import json
+        with open(mcp_path, "r", encoding="utf-8") as f:
+            self.assertIn("codebase-memory-mcp", json.load(f)["mcpServers"])
+
 
 class TestDocAlignment(unittest.TestCase):
     def setUp(self):

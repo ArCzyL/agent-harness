@@ -81,8 +81,8 @@ if ($UserPath -notlike "*$InstallDir*") {
     Write-Host "✅ Added $InstallDir to User PATH environment variable." -ForegroundColor Green
 }
 
-# 5. Run setup across installed IDEs
-Write-Host "🔧 Configuring installed AI IDEs..." -ForegroundColor Cyan
+# 5. Run setup across all supported IDEs
+Write-Host "🔧 Configuring all supported AI IDEs..." -ForegroundColor Cyan
 & python $CliPy setup
 
 # 6. Start daemon

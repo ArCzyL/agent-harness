@@ -61,7 +61,7 @@ irm https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.ps1 | ie
 
 ### What the installer does automatically:
 1. Downloads and activates the ultra-fast `codebase-memory-mcp` daemon.
-2. Scans your machine for installed AI editors (TRAE, Cursor, Claude Code, Antigravity, Windsurf) and configures their global MCP settings (with automated `.bak` backups on corrupted files).
+2. Writes global MCP settings for every supported AI editor (TRAE, Cursor, Claude Code, Antigravity, Windsurf) — including ones not installed yet, so they work as soon as you install them (with automated `.bak` backups on corrupted files).
 3. Configures global Git protection (`~/.gitignore_global`) to safeguard private repos.
 4. Installs the `agent-harness` CLI into `~/.local/bin/`.
 

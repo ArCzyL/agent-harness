@@ -65,7 +65,7 @@ irm https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.ps1 | ie
 
 ### 安装脚本会自动完成：
 1. 自动下载并启动高性能的 `codebase-memory-mcp` 本地守护进程；
-2. 扫描本机已安装的 AI 工具（TRAE、Cursor、Claude Code、Antigravity、Windsurf 等）并自动注入全局 MCP 配置（损坏配置自动生成 `.bak` 备份）；
+2. 为所有支持的 AI 工具（TRAE、Cursor、Claude Code、Antigravity、Windsurf 等）写入全局 MCP 配置——尚未安装的工具也会预先写好，日后安装即可直接生效（损坏配置自动生成 `.bak` 备份）；
 3. 配置全局 Git 防污染规则（`~/.gitignore_global`）；
 4. 将 `agent-harness` CLI 注册到 `~/.local/bin/`。
 

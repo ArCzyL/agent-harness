@@ -36,7 +36,7 @@ def print_help():
     print("  agent-harness init [path]    Index codebase & bootstrap tailor-made AGENTS.md")
     print("  agent-harness check [path]   Verify AGENTS.md matches repo stack, entry points, tests")
     print("  agent-harness sync [path]    Refresh marker-managed facts in AGENTS.md (keeps custom rules)")
-    print("  agent-harness setup          Auto-configure MCP & rules across all installed AI IDEs")
+    print("  agent-harness setup          Pre-configure MCP for all supported AI IDEs (installed or not)")
     print("  agent-harness status         Show codebase memory daemon & indexed projects status")
     print("  agent-harness ui             Open the 3D Knowledge Graph UI in browser (localhost:9749)")
     print("  agent-harness version        Print version")
@@ -561,7 +561,7 @@ def safe_inject_mcp(target_path, ide_name):
     """Safely injects codebase-memory-mcp into an IDE's JSON configuration with corruption backup."""
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
     data = {}
-    if os.path.exists(target_path):
+    if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
         try:
             with open(target_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -588,7 +588,7 @@ def safe_inject_mcp(target_path, ide_name):
 
 def cmd_setup():
     print(BANNER)
-    print("🔧 [agent-harness] Scanning system for installed AI coding tools...\n")
+    print("🔧 [agent-harness] Writing MCP config for every supported AI coding tool (tools installed later pick it up automatically)...\n")
     
     # 1. TRAE
     appdata = os.environ.get("APPDATA", "")
@@ -632,7 +632,7 @@ def cmd_setup():
     run_cmd(["git", "config", "--global", "core.excludesfile", global_gitignore])
     print(f"  🛡️  Configured Global Git Exclude: {global_gitignore}")
 
-    print("\n✨ All installed AI development tools are configured and ready!\n")
+    print("\n✨ All supported AI development tools are configured and ready!\n")
 
 def cmd_status():
     print(BANNER)

@@ -111,7 +111,7 @@ if [ -n "${SHELL_RC}" ]; then
     fi
 fi
 
-# 5. Run auto-configuration across installed IDEs
+# 5. Run auto-configuration across all supported IDEs
 "${INSTALL_DIR}/agent-harness" setup
 
 # 6. Start daemon if not running

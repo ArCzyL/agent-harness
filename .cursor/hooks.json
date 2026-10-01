@@ -3,7 +3,7 @@
   "hooks": {
     "stop": [
       {
-        "command": "python3 .cursor/hooks/verify.py",
+        "command": "python3 .githooks/agent-stop.py",
         "timeout": 120,
         "loop_limit": 3
       }

@@ -73,7 +73,7 @@
 
 - **文档与代码对齐检查**：`python3 bin/agent-harness check`
 
-- **自动执行**：以上三条命令写在 `.githooks/pre-commit`（改动时两处同步）。Cursor 每轮回复结束时，`.cursor/hooks.json` 的 `stop` 钩子会自动运行它，失败则把报错发回给智能体继续修复（最多 3 轮）；`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
+- **自动执行**：以上三条命令写在 `.githooks/pre-commit`（改动时两处同步）。Cursor（`.cursor/hooks.json`）和 Antigravity（`.agents/hooks.json`）每轮回复结束时，都会通过 `.githooks/agent-stop.py` 自动运行它，失败则把报错发回给智能体继续修复（最多 3 轮）；`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
 
 ### 文档与代码对齐（防下一会话漂移）
 

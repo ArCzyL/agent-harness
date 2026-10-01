@@ -57,7 +57,7 @@ The framework consists of three tightly coupled, lightweight layers:
 8. If `AGENTS.md` already exists, prints a reminder to run `agent-harness check` / `sync` instead of regenerating.
 
 ### Flow B: Global Setup (`agent-harness setup`)
-1. Scans filesystem for installed client configuration targets:
+1. Writes to every supported client's configuration target, whether or not the client is installed yet (a later install picks the config up automatically):
    - TRAE (`~/Library/Application Support/TRAE SOLO CN/User/mcp.json`, `~/.trae/mcp.json`, `%APPDATA%\Trae\User\mcp.json`)
    - Cursor (`~/.cursor/mcp.json`)
    - Claude Code (`~/.claude.json`)

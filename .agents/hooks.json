@@ -1,0 +1,11 @@
+{
+  "agent-harness-verify": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 ../.githooks/agent-stop.py",
+        "timeout": 120
+      }
+    ]
+  }
+}
