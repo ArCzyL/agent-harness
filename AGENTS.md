@@ -73,7 +73,7 @@
 
 - **文档与代码对齐检查**：`python3 bin/agent-harness check`
 
-- **自动执行**：以上三条命令写在 `.githooks/pre-commit` 和 `.github/workflows/test.yml`（改动时三处同步；CI 在 Ubuntu / Windows / macOS 上用 Python 3.9 运行它们）。Cursor（`.cursor/hooks.json`）和 Antigravity（`.agents/hooks.json`）每轮回复结束时，都会通过 `.githooks/agent-stop.py` 自动运行它。`check` 以失败退出时（技术栈、入口点、测试命令不一致，或实现文件已改而引用该路径的说明没有一起改），钩子把终端输出发回给智能体继续修改（最多 3 轮）；`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
+- **自动执行**：以上三条命令写在 `.githooks/pre-commit` 和 `.github/workflows/test.yml`（改动时三处同步；CI 在 Ubuntu / Windows / macOS 上用 Python 3.9 运行它们）。Cursor（`.cursor/hooks.json`）和 Antigravity（`.agents/hooks.json`）每轮回复结束时运行本仓库的 `python3 bin/agent-harness verify --hook`：文件自上次检查后有变化时，按顺序执行上面三条命令；任一条失败（例如技术栈、入口点、测试命令不一致，或实现文件已改而引用该路径的说明没有一起改），或 270 秒内没有跑完，钩子都把终端输出发回给智能体继续修改（最多 3 轮）。`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
 
 ### 文档与代码对齐（防下一会话漂移）
 
@@ -110,9 +110,11 @@
 
 ## 5. 业务专属红线与约束
 
+- **使用者与优先级**：本项目只供开发者本人使用。开发者是中文用户、编程新手，代码全部由 AI 编写；AI 开发工具直接安装在 macOS 和 Windows 上。改进按开发者真实项目里会碰到的问题排优先级；向开发者汇报时用中文和平实的说法。
+
 - **零依赖 + Python 3.9**：`bin/agent-harness` 只用 Python 标准库与 Python 3.9 语法（分支用 `if/elif`，类型注解用 `typing.Optional` / `typing.Union`），确保能在 macOS 自带的 Python 3.9 上运行。
 
-- **保留用户内容**：`init` 在 `AGENTS.md` 不存在时创建它；文件已存在时保留原文，只在末尾追加缺失的规范段落和 `<!-- agent-harness:auto:* -->` 标记，已经写全的文件保持不动。`sync` 只改标记内的内容；`init` 把 stop hook 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，保留原有条目且只添加一次；`init` 与 `setup` 改写 IDE 配置时，原文件解析失败先生成 `.bak` 备份。已有 `core.excludesfile` 时，把图谱忽略规则追加进该文件并保留原路径；还没有该配置时，才写入 `~/.gitignore_global` 并设为 excludes 文件。
+- **保留用户内容**：`init` 在 `AGENTS.md` 不存在时创建它；文件已存在时保留原文，只在末尾追加缺失的规范段落和 `<!-- agent-harness:auto:* -->` 标记，已经写全的文件保持不动；已有「测试与校验命令」段的文件沿用这一段作为命令清单。`sync` 只改标记内的内容；`init` 把 stop hook 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，保留原有条目且只添加一次；`init` 与 `setup` 改写 IDE 配置时先写临时文件再整体替换，原文件解析失败先生成 `.bak` 备份。已有 `core.excludesfile` 时，把图谱忽略规则追加进该文件并保留原路径；还没有该配置时，才写入 `~/.gitignore_global` 并设为 excludes 文件。
 
 - **逻辑与说明同一改动**：改了逻辑或实现方法时，同一次改动里更新描述该行为的说明（README、`docs/`、`AGENTS.md` 的对应段落）。`agent-harness check` 在实现文件已改、且引用该路径的说明文档未出现在本次改动里时失败；智能体补上对应段落后再交付。
 

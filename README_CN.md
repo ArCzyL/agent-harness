@@ -43,7 +43,7 @@
 * 📝 **长会话不走样的规则写法**：
   生成的 `AGENTS.md` 全部用肯定句写成「做什么、怎么做」，只写正确做法，并要求 AI 也这样写文档、注释和会话总结；你在对话中提出的长期要求，AI 会当轮写进 `AGENTS.md`。长会话压缩上下文后，AI 读到的仍是完整、正确的规则。
 * 🔒 **物理测试闭环（Test Harness Loop）**：
-  自动嗅探项目技术栈（Go、Rust、TypeScript/Node、Python）。根目录没有某个技术栈的清单文件时，向下两层识别子项目，生成在子项目目录里执行的命令（如 `cd web && pnpm test`）。测试命令来自仓库里已经存在的脚本和配置：`scripts.test`、`scripts.lint`、`tsconfig.json`、pytest / ruff 配置、`Cargo.toml`、`go.mod`。`init` 还会为 Cursor、Claude Code、Antigravity 装好 stop hook：每轮回复结束、工作区有未提交改动时，`agent-harness verify` 执行这些命令，失败时把输出发回给智能体继续修改（最多 3 轮）。闭环如下：  
+  自动嗅探项目技术栈（Go、Rust、TypeScript/Node、Python）。根目录没有某个技术栈的清单文件时，向下两层识别子项目，生成在子项目目录里执行的命令（如 `cd web && pnpm test`）。测试命令来自仓库里已经存在的脚本和配置：`scripts.test`、`scripts.lint`、`tsconfig.json`、pytest / ruff 配置、`Cargo.toml`、`go.mod`。`init` 还会为 Cursor、Claude Code、Antigravity 装好 stop hook：每轮回复结束时，若文件自上次检查后有变化（提交也算；只问问题的一轮立即结束），`agent-harness verify` 在 270 秒内执行这些命令，失败或超时都把原因发回给智能体继续修改（最多 3 轮）。闭环如下：  
   $$\text{编写/修改代码} \longrightarrow \text{运行测试命令} \longrightarrow \text{根据报错自行修复} \longrightarrow \text{全部绿灯通过} \longrightarrow \text{交付开发者}$$
 * 🌐 **100% 跨开发工具（IDE-Agnostic）**：
   MCP 配置写入 **TRAE、Cursor、Claude Code、Antigravity、Windsurf**。**Zed** 与 **VS Code** 直接读取仓库里的 `AGENTS.md`，`setup` 不为这两家写 MCP 文件。规则以 `AGENTS.md` 为唯一事实源，并自动生成只含一行 `@AGENTS.md` 引用的 `CLAUDE.md`、`GEMINI.md`（不用软链接，避免同时读取多个规则文件的工具重复加载）。
@@ -67,9 +67,9 @@ irm https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.ps1 | ie
 
 ### 安装脚本会自动完成：
 1. 自动下载**官方最新版** `codebase-memory-mcp` 并启动本地守护进程；已安装旧版时重跑安装脚本即可升级（升级后需在已打开的 AI 工具里重启一次该 MCP）；
-2. 为 TRAE、Cursor、Claude Code、Antigravity、Windsurf 写入全局 MCP 配置——尚未安装的工具也会预先写好，日后安装即可直接生效（损坏配置自动生成 `.bak` 备份）。Zed 与 VS Code 读取仓库 `AGENTS.md`；
+2. 为 TRAE、Cursor、Claude Code、Antigravity、Windsurf 写入全局 MCP 配置——尚未安装的工具也会预先写好，日后安装即可直接生效（损坏配置自动生成 `.bak` 备份）。每个文件先写进临时文件再整体替换，写到一半被打断时原文件保持完好。Zed 与 VS Code 读取仓库 `AGENTS.md`；
 3. 把图谱忽略规则追加到 Git 已经在用的全局 excludes 文件；还没有 `core.excludesfile` 时，才创建 `~/.gitignore_global` 并设为该路径；
-4. 将 `agent-harness` CLI 注册到 `~/.local/bin/`。
+4. 将 `agent-harness` CLI 注册到 `~/.local/bin/`：`curl | bash` 时从 GitHub 下载 CLI 和规则模板，在克隆下来的仓库里运行 `bash install.sh` 时用仓库里的文件。
 
 ---
 
@@ -87,7 +87,7 @@ agent-harness init .
 > **“为当前项目建图并初始化开发规范”**
 
 ### 智能体闭环流程：
-1. **防误覆盖保护**：已有 `AGENTS.md` 时原文保留。里面还没有 Karpathy 准则、测试命令、文档对齐或知识图谱检索纪律时，`init` 在末尾补上这些段落；已经写全的文件保持不动。
+1. **防误覆盖保护**：已有 `AGENTS.md` 时原文保留。里面还没有 Karpathy 准则、测试命令、文档对齐或知识图谱检索纪律时，`init` 在末尾补上这些段落；已经写全的文件保持不动。已有手写的「测试与校验命令」段时，这一段就是项目唯一的命令清单。
 2. **建图 + 事实推导**：为项目建立本地知识图谱供 AI 实时查询；写入 `AGENTS.md` 的语言与入口点按文件系统规则推导，与 `check` / `sync` 用同一套规则，二者永不打架，也不依赖引擎是否安装；
 3. **定制化生成 `AGENTS.md`**：按仓库里已经存在的测试脚本和配置填入测试命令，并写入 Karpathy 四大纪律；
 4. **跨工具引用同步**：自动生成只含 `@AGENTS.md` 一行的 `CLAUDE.md` / `GEMINI.md`，规则只维护一份、只加载一次；旧版本生成的软链接（含 `.cursorrules`）会自动迁移。
@@ -103,7 +103,7 @@ agent-harness sync           # 只刷新 <!-- agent-harness:auto:* --> 托管字
 agent-harness verify         # 按顺序执行 AGENTS.md 里列出的测试与校验命令（stop hook 调用的就是它）
 ```
 
-`check` 要求每个识别出的技术栈在 `AGENTS.md` 里有一条测试命令，等价写法都算（`pytest` 可替代 `unittest`，`pnpm run test` 可替代 `npm test` 等）；lint 和类型检查由你决定写不写。文档检查只看说明性文档：下载链接、`CHANGELOG` / ADR 文件、测试文件（`tests/`、`*_test.go`、`*.test.ts` 等）不参与比对；`git commit` 时只核对暂存区的改动。
+`check` 要求每个识别出的技术栈在 `AGENTS.md` 里有一条测试命令，等价写法都算（`pytest` 可替代 `unittest`，`pnpm run test` 可替代 `npm test` 等）；lint 和类型检查由你决定写不写。文档检查只看说明性文档：下载链接、`CHANGELOG` / ADR 文件、测试文件（`tests/`、`*_test.go`、`*.test.ts` 等）不参与比对；`git commit` 时只核对暂存区的改动。要手动改某个带标记的字段（例如测试命令要加环境变量）时，先删掉包住它的那对标记，之后 `sync` 跳过这一段。
 
 ---
 
@@ -140,7 +140,7 @@ agent-harness verify         # 按顺序执行 AGENTS.md 里列出的测试与�
 ```bash
 agent-harness ui
 ```
-或者在浏览器中直接打开：**`http://localhost:9749`**。
+或者在浏览器中直接打开：**`http://localhost:9749`**。看板跟着引擎运行；这个端口没有响应时，`ui` 会说明怎么打开它，`status` 会标出它没有运行。
 
 ---
 
@@ -159,8 +159,8 @@ agent-harness ui
 
 * 🏗️ **核心架构与系统实装 (Primary Architect & Engineer)**：**Google Gemini (Antigravity Agent)** 负责高并发流式解析设计、跨平台实现与多轮测试自愈重构；
 * 🔬 **白盒审计与对抗挑刺 (Adversarial Code Reviewer)**：**智谱 GLM-5.3 (TRAE)** 进行了 5 轮尖锐的代码审计，逼出并修复了包括单测隔离、Monorepo 嗅探与坏配置保护等深层隐患；
-* 🧠 **深度逻辑推理与图谱验证 (Deep Reasoning & Graph Auditor)**：**DeepSeek V4 PRO (Max Thinking)** 全量通读 AST 知识图谱并实跑单测套件，验证了 13/13 项测试 100% 绿灯与架构自洽性；
-* ⚖️ **形式化语义与安全辩论 (Philosophical & Security Auditor)**：**Anthropic Claude Sonnet 5 (Thinking)** 深度通读 485 行完整源码，对“物理围栏机制”与“退出码信号确定性”进行了极高密度的学术级论证，验证了纯标准库实现的安全与透明；
+* 🧠 **深度逻辑推理与图谱验证 (Deep Reasoning & Graph Auditor)**：**DeepSeek V4 PRO (Max Thinking)** 全量通读 AST 知识图谱并实跑单测套件，验证了当时 13/13 项测试 100% 绿灯与架构自洽性；
+* ⚖️ **形式化语义与安全辩论 (Philosophical & Security Auditor)**：**Anthropic Claude Sonnet 5 (Thinking)** 深度通读当时 485 行的完整源码，对“物理围栏机制”与“退出码信号确定性”进行了极高密度的学术级论证，验证了纯标准库实现的安全与透明；
 * 👨‍✈️ **人类总指挥与最终裁决者 (Human Orchestrator & Principal)**：**[@ArCzyL](https://github.com/ArCzyL)** 担任系统架构把控与多模型博弈仲裁。
 
 ---

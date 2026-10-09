@@ -8,8 +8,10 @@ import contextlib
 import io
 import json
 import os
+import socket
 import subprocess
 import sys
+import time
 import unittest
 import tempfile
 import shutil
@@ -430,6 +432,16 @@ class TestInitExecutionAndSafety(unittest.TestCase):
         with open(agents_path, "r", encoding="utf-8") as f:
             self.assertEqual(f.read(), first)
 
+    def test_init_keeps_a_handwritten_test_command_section_as_the_only_one(self):
+        write(self.test_dir, "go.mod", "module demo\n")
+        write(self.test_dir, "AGENTS.md", "# demo\n\n### 本项目测试与校验命令：\n- **全局单元测试验证**：`go test ./internal/...`\n")
+        ah.cmd_init(self.test_dir)
+        with open(os.path.join(self.test_dir, "AGENTS.md"), "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertEqual(content.count("测试与校验命令"), 1)
+        self.assertEqual(ah.harness_commands(content), ["go test ./internal/..."])
+        self.assertEqual(ah.alignment_issues(self.test_dir), [])
+
     def test_alias_files_import_agents_md(self):
         ah.cmd_init(self.test_dir)
 
@@ -498,6 +510,26 @@ class TestInitExecutionAndSafety(unittest.TestCase):
         import json
         with open(mcp_path, "r", encoding="utf-8") as f:
             self.assertIn("codebase-memory-mcp", json.load(f)["mcpServers"])
+
+    def test_interrupted_config_write_leaves_the_original_file_whole(self):
+        original = '{"projects": {"/Users/rex/资料/demo": {"allowedTools": []}}}'
+        mcp_path = write(self.test_dir, "claude.json", original)
+
+        def dump_then_fail(obj, fp, **kwargs):
+            fp.write('{"projects": ')
+            raise OSError("disk full")
+
+        with mock.patch.object(ah.json, "dump", dump_then_fail), self.assertRaises(OSError):
+            ah.safe_inject_mcp(mcp_path, "Claude Code")
+        with open(mcp_path, "r", encoding="utf-8") as f:
+            self.assertEqual(f.read(), original)
+        self.assertEqual(os.listdir(self.test_dir), ["claude.json"])
+
+        ah.safe_inject_mcp(mcp_path, "Claude Code")
+        with open(mcp_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("/Users/rex/资料/demo", text)
+        self.assertIn("codebase-memory-mcp", json.loads(text)["mcpServers"])
 
     def test_excludesfile_appends_without_replacing_existing_path(self):
         target = os.path.join(self.test_dir, "excludes.txt")
@@ -689,6 +721,26 @@ class TestDocAlignment(unittest.TestCase):
         self.assertIn("cargo test", content)
         self.assertEqual(ah.alignment_issues(self.test_dir), [])
 
+    def test_custom_commands_survive_sync_and_init_once_their_markers_are_removed(self):
+        write(self.test_dir, "Cargo.toml", "[package]\nname = 'demo'\n")
+        ah.cmd_init(self.test_dir)
+        agents_path = os.path.join(self.test_dir, "AGENTS.md")
+        with open(agents_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("先删掉包住这段的那对标记", content)
+        content = content.replace("<!-- agent-harness:auto:harness -->", "").replace(
+            "<!-- /agent-harness:auto:harness -->", "").replace(
+            "`cargo check && cargo test`", "`SQLX_OFFLINE=true cargo check && SQLX_OFFLINE=true cargo test`")
+        with open(agents_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        ah.cmd_sync(self.test_dir)
+        ah.cmd_init(self.test_dir)
+        with open(agents_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("`SQLX_OFFLINE=true cargo check && SQLX_OFFLINE=true cargo test`", content)
+        self.assertEqual(content.count("测试与校验命令"), 1)
+        self.assertEqual(ah.alignment_issues(self.test_dir), [])
+
     def test_sync_refuses_to_rewrite_unmarked_handwritten_docs(self):
         agents_path = os.path.join(self.test_dir, "AGENTS.md")
         secret = "# MY HAND-CRAFTED RULES - DO NOT OVERWRITE\n"
@@ -795,6 +847,14 @@ class TestDocAlignment(unittest.TestCase):
         issues = ah.doc_drift_issues(self.test_dir)
         self.assertTrue(any("docs/legacy.md" in item for item in issues), issues)
 
+    def test_a_path_ending_a_sentence_is_a_citation(self):
+        write(self.test_dir, "README.md", "The flow lives in bin/tool.\n")
+        write(self.test_dir, "docs/other.md", "The helper lives in bin/tool.py now.\n")
+        ah.list_changed_files = lambda target: ["bin/tool"]
+        issues = ah.doc_drift_issues(self.test_dir)
+        self.assertTrue(any("README.md" in item and "仍引用它" in item for item in issues), issues)
+        self.assertFalse(any("docs/other.md" in item for item in issues), issues)
+
     def test_download_urls_are_not_citations(self):
         write(self.test_dir, "README.md", "curl -fsSL https://example.com/main/install.sh | bash\n")
         ah.list_changed_files = lambda target: ["install.sh", "AGENTS.md"]
@@ -862,6 +922,30 @@ class TestCommandLine(unittest.TestCase):
             legacy.flush()
         self.assertIn("❌", raw.getvalue().decode("utf-8"))
 
+    def test_ui_and_status_check_that_the_visualizer_answers(self):
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(5)
+        self.addCleanup(server.close)
+        opened = []
+        up, down = io.StringIO(), io.StringIO()
+        with mock.patch.object(ah, "UI_PORT", server.getsockname()[1]), \
+                mock.patch.object(ah.webbrowser, "open", opened.append), \
+                mock.patch.object(ah, "run_cbm_cli", lambda tool, params=None: {"projects": []}), \
+                mock.patch.object(ah, "CBM_BIN", sys.executable):
+            with contextlib.redirect_stdout(up):
+                ah.cmd_ui()
+                ah.cmd_status()
+            server.close()
+            with contextlib.redirect_stdout(down):
+                ah.cmd_status()
+                with self.assertRaises(SystemExit):
+                    ah.cmd_ui()
+        self.assertEqual(len(opened), 1)
+        self.assertIn("3D 图谱界面：http://localhost:", up.getvalue())
+        self.assertIn("没有运行", down.getvalue())
+        self.assertIn("ui_enabled", down.getvalue())
+
 
 class TestStopHooks(unittest.TestCase):
     def setUp(self):
@@ -916,7 +1000,7 @@ class TestVerify(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.test_dir, True)
-        patcher = mock.patch.object(ah, "VERIFY_RETRY_FILE", os.path.join(self.test_dir, "retries.json"))
+        patcher = mock.patch.object(ah, "VERIFY_STATE_FILE", os.path.join(self.test_dir, "state.json"))
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -932,8 +1016,8 @@ class TestVerify(unittest.TestCase):
               "- **自动执行**：每轮回复结束时运行 `agent-harness verify`。\n\n"
               "### 文档与代码对齐\n- **示例**：`echo later`\n".format(command))
 
-    def respond(self, event, dirty=True):
-        fake = FakeRun({"status": (0, " M a.py\n" if dirty else "")})
+    def respond(self, event, status=" M a.py\0", head="abc"):
+        fake = FakeRun({"status": (0, status), "rev-parse": (0, self.test_dir + "\n" + head + "\n")})
         with mock.patch.object(ah, "run_cmd", fake):
             return ah.verify_hook_response(self.test_dir, event)
 
@@ -944,29 +1028,52 @@ class TestVerify(unittest.TestCase):
 
     def test_failure_reply_matches_each_ide(self):
         self.agents(self.FAILING)
-        cursor = self.respond({"hook_event_name": "stop", "status": "completed", "loop_count": 0})
+        cursor = self.respond({"hook_event_name": "stop", "status": "completed", "loop_count": 0}, head="1")
         self.assertIn("FAIL: probe", cursor["followup_message"])
-        claude = self.respond({"hook_event_name": "Stop", "session_id": "s", "stop_hook_active": False})
+        claude = self.respond({"hook_event_name": "Stop", "session_id": "s", "stop_hook_active": False}, head="2")
         self.assertEqual(claude["decision"], "block")
         self.assertIn("FAIL: probe", claude["reason"])
-        antigravity = self.respond({"conversationId": "c", "terminationReason": "NO_TOOL_CALL"})
-        self.assertEqual(antigravity["decision"], "continue")
-        self.assertIn("FAIL: probe", antigravity["reason"])
+        # Antigravity's docs say "model_stop"; real runs send "NO_TOOL_CALL"
+        for n, reason in enumerate(["model_stop", "NO_TOOL_CALL"]):
+            antigravity = self.respond({"conversationId": reason, "terminationReason": reason}, head="3" + str(n))
+            self.assertEqual(antigravity["decision"], "continue")
+            self.assertIn("FAIL: probe", antigravity["reason"])
 
-    def test_commands_run_only_on_a_dirty_tree_after_a_normal_stop(self):
+    def test_commands_run_only_when_files_changed_since_the_last_stop(self):
         self.agents(self.MARKER)
         marker = os.path.join(self.test_dir, "ran.txt")
-        self.assertEqual(self.respond({"status": "completed"}, dirty=False), {})
-        self.assertEqual(self.respond({"status": "aborted"}), {})
-        self.assertFalse(os.path.exists(marker))
-        self.assertEqual(self.respond({"status": "completed"}), {})
-        self.assertTrue(os.path.exists(marker))
+        write(self.test_dir, "a.py", "x = 1\n")
+
+        def ran(event, **tree):
+            if os.path.exists(marker):
+                os.remove(marker)
+            self.assertEqual(self.respond(event, **tree), {})
+            return os.path.exists(marker)
+
+        self.assertFalse(ran({"status": "completed"}, status=""))
+        for event in [{"status": "aborted"}, {"conversationId": "c", "terminationReason": "error", "error": "boom"},
+                      {"conversationId": "c", "terminationReason": "max_steps_exceeded", "error": ""}]:
+            self.assertFalse(ran(event), event)
+        self.assertTrue(ran({"status": "completed"}))
+        self.assertFalse(ran({"status": "completed"}), "a question-only turn leaves the files as they were")
+        write(self.test_dir, "a.py", "x = 22\n")
+        self.assertTrue(ran({"status": "completed"}), "the same file edited again")
+        self.assertTrue(ran({"status": "completed"}, status="", head="def"), "the changes were committed this turn")
 
     def test_claude_code_stops_asking_after_three_rounds(self):
         self.agents(self.FAILING)
         event = {"hook_event_name": "Stop", "session_id": "s", "stop_hook_active": True}
-        replies = [self.respond(event) for _ in range(4)]
+        replies = [self.respond(event, head=str(n)) for n in range(4)]
         self.assertEqual([r.get("decision") for r in replies], ["block", "block", "block", None])
+
+    def test_hook_stops_a_command_that_outlives_the_time_budget(self):
+        self.agents("python3 -c \"import time; print('started', flush=True); time.sleep(30)\"")
+        start = time.monotonic()
+        with mock.patch.object(ah, "VERIFY_BUDGET", 1):
+            reply = self.respond({"status": "completed"})
+        self.assertLess(time.monotonic() - start, 15)
+        self.assertIn("started", reply["followup_message"])
+        self.assertIn("限时 1 秒", reply["followup_message"])
 
     def test_hook_mode_reads_the_event_from_stdin(self):
         self.agents(self.FAILING)
@@ -988,50 +1095,56 @@ class TestVerify(unittest.TestCase):
         self.assertEqual(cm.exception.code, 1)
         self.assertIn("FAIL: probe", out.getvalue())
 
+    def test_this_repo_runs_its_own_verify_from_each_ide_hook(self):
+        repo = os.path.join(SCRIPT_DIR, "..")
+        for rel, keys, prefix in [(".cursor/hooks.json", ["hooks", "stop"], ""),
+                                  (".agents/hooks.json", ["agent-harness-verify", "Stop"], "../")]:
+            with open(os.path.join(repo, *rel.split("/")), "r", encoding="utf-8") as f:
+                entries = json.load(f)
+            for key in keys:
+                entries = entries[key]
+            self.assertEqual([e["command"] for e in entries], ["python3 {0}bin/agent-harness verify --hook".format(prefix)])
 
-@unittest.skipIf(sys.platform == "win32", "runs a POSIX fake git and sh")
-class TestAgentStopHook(unittest.TestCase):
-    """Runs a copy of .githooks/agent-stop.py in a temp dir with a dirty fake git and always-failing checks."""
 
-    def setUp(self):
-        self.test_dir = tempfile.mkdtemp()
-        hooks_dir = os.path.join(self.test_dir, ".githooks")
-        os.makedirs(hooks_dir)
-        shutil.copy(os.path.join(SCRIPT_DIR, "..", ".githooks", "agent-stop.py"), hooks_dir)
-        with open(os.path.join(hooks_dir, "pre-commit"), "w") as f:
-            f.write("#!/bin/sh\necho 'FAIL: probe'\nexit 1\n")
-        self.fake_bin = os.path.join(self.test_dir, "fake-bin")
-        os.makedirs(self.fake_bin)
-        fake_git = os.path.join(self.fake_bin, "git")
-        with open(fake_git, "w") as f:
-            f.write("#!/bin/sh\necho '?? dirty.txt'\n")
-        os.chmod(fake_git, 0o755)
+@unittest.skipIf(sys.platform == "win32", "runs install.sh with bash")
+class TestInstaller(unittest.TestCase):
+    """Runs install.sh from a project that has its own templates/, with fake curl, git, and engine in a temp HOME."""
+    STUB = "#!/bin/sh\nexit 0\n"
+    REPO = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 
-    def tearDown(self):
-        shutil.rmtree(self.test_dir, ignore_errors=True)
+    def install(self, argv, stdin=None):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        home, fake_bin, project = [os.path.join(root, name) for name in ("home", "fake-bin", "project")]
+        write(project, "templates/index.html", "<html></html>\n")
+        fake_curl = ("#!/bin/sh\n"
+                     "while [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n"
+                     "[ -n \"$out\" ] && [ \"$out\" != /dev/null ] && printf '{0}' > \"$out\"\n"
+                     "exit 0\n").format(self.STUB.replace("\n", "\\n"))
+        for path, body in [(os.path.join(home, ".local", "bin", "codebase-memory-mcp"), self.STUB),
+                           (os.path.join(fake_bin, "curl"), fake_curl), (os.path.join(fake_bin, "git"), self.STUB)]:
+            os.chmod(write(os.path.dirname(path), os.path.basename(path), body), 0o755)
+        res = subprocess.run(argv, input=stdin, cwd=project, capture_output=True,
+                             env={"HOME": home, "PATH": fake_bin + os.pathsep + "/usr/bin:/bin", "SHELL": "/bin/sh"})
+        self.assertEqual(res.returncode, 0, (res.stdout + res.stderr).decode("utf-8", "replace"))
+        return home
 
-    def run_hook(self, event):
-        import json
-        import subprocess
-        res = subprocess.run(
-            [sys.executable, os.path.join(self.test_dir, ".githooks", "agent-stop.py")],
-            input=json.dumps(event), capture_output=True, text=True,
-            env=dict(os.environ, TMPDIR=self.test_dir, PATH=self.fake_bin + os.pathsep + os.environ["PATH"]),
-        )
-        return json.loads(res.stdout)
+    def read(self, *parts):
+        with open(os.path.join(*parts), "r", encoding="utf-8") as f:
+            return f.read()
 
-    def test_antigravity_normal_stop_reasons_trigger_verification(self):
-        # Docs show "model_stop"; real Antigravity runs send "NO_TOOL_CALL"
-        for reason in ["model_stop", "NO_TOOL_CALL"]:
-            out = self.run_hook({"conversationId": reason, "terminationReason": reason, "executionNum": 0})
-            self.assertEqual(out.get("decision"), "continue", reason)
-            self.assertIn("FAIL: probe", out.get("reason", ""))
+    def test_piped_install_downloads_instead_of_copying_the_current_directory(self):
+        with open(os.path.join(self.REPO, "install.sh"), "rb") as f:
+            home = self.install(["bash", "-s"], f.read())
+        share = os.path.join(home, ".local", "share", "agent-harness", "templates")
+        self.assertEqual(os.listdir(share), ["karpathy_rules.md"])
+        self.assertEqual(self.read(share, "karpathy_rules.md"), self.STUB)
 
-    def test_antigravity_error_stop_is_left_alone(self):
-        for event in [{"terminationReason": "error", "error": "boom"},
-                      {"terminationReason": "max_steps_exceeded", "error": ""}]:
-            event["conversationId"] = "c"
-            self.assertEqual(self.run_hook(event), {}, event)
+    def test_install_from_a_clone_copies_its_own_cli_and_templates(self):
+        home = self.install(["bash", os.path.join(self.REPO, "install.sh")])
+        self.assertEqual(self.read(home, ".local", "share", "agent-harness", "templates", "karpathy_rules.md"),
+                         self.read(self.REPO, "templates", "karpathy_rules.md"))
+        self.assertEqual(self.read(home, ".local", "bin", "agent-harness"), self.read(self.REPO, "bin", "agent-harness"))
 
 
 if __name__ == "__main__":

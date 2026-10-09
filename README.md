@@ -39,7 +39,7 @@ Every developer pairing with AI coding agents (Cursor, TRAE, Claude Code, Antigr
 * 📝 **Rules That Survive Long Sessions**:
   The generated `AGENTS.md` states every rule affirmatively as "what to do and how", describing only the correct behavior, and asks the agent to write docs, comments, and session summaries the same way. Long-term requirements you give in chat are written into `AGENTS.md` in the same turn, so the rules stay complete and correct after context compression.
 * 🔒 **Physical Test Harness (The Execution Loop)**:
-  Auto-detects Go, Rust, TypeScript/Node, and Python. When the root has no manifest for a stack, sub-projects up to two levels down get commands that run in their own directory (e.g. `cd web && pnpm test`). Test commands come from scripts and config that already exist: `scripts.test`, `scripts.lint`, `tsconfig.json`, pytest / ruff config, `Cargo.toml`, and `go.mod`. `init` also adds a stop hook for Cursor, Claude Code, and Antigravity: when an agent turn ends with uncommitted changes, `agent-harness verify` runs those commands and hands any failure back to the agent (up to 3 rounds). The loop:  
+  Auto-detects Go, Rust, TypeScript/Node, and Python. When the root has no manifest for a stack, sub-projects up to two levels down get commands that run in their own directory (e.g. `cd web && pnpm test`). Test commands come from scripts and config that already exist: `scripts.test`, `scripts.lint`, `tsconfig.json`, pytest / ruff config, `Cargo.toml`, and `go.mod`. `init` also adds a stop hook for Cursor, Claude Code, and Antigravity: when an agent turn ends and files changed since the hook last looked (a commit counts; a question-only turn ends at once), `agent-harness verify` runs those commands within 270 seconds and hands any failure or timeout back to the agent (up to 3 rounds). The loop:  
   $$\text{Code} \longrightarrow \text{Run Test} \longrightarrow \text{Auto-Fix Errors} \longrightarrow \text{All Green} \longrightarrow \text{Deliver}$$
 * 🌐 **100% IDE & Client Agnostic**:
   MCP config is written for **TRAE, Cursor, Claude Code, Antigravity, and Windsurf**. **Zed** and **VS Code** read `AGENTS.md` from the repo; `setup` does not write an MCP file for them. Single source of truth via universal `AGENTS.md`, complemented by one-line `@AGENTS.md` import files (`CLAUDE.md`, `GEMINI.md`) instead of symlinks, so tools that read several rule files load the rules only once.
@@ -63,9 +63,9 @@ irm https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.ps1 | ie
 
 ### What the installer does automatically:
 1. Downloads the **latest official** `codebase-memory-mcp` release and activates its daemon; re-running the installer upgrades an older engine (then restart the MCP server once in any open AI tool).
-2. Writes global MCP settings for TRAE, Cursor, Claude Code, Antigravity, and Windsurf — including ones not installed yet, so they work as soon as you install them (with automated `.bak` backups on corrupted files). Zed and VS Code read `AGENTS.md` from the repo.
+2. Writes global MCP settings for TRAE, Cursor, Claude Code, Antigravity, and Windsurf — including ones not installed yet, so they work as soon as you install them (with automated `.bak` backups on corrupted files). Each file is written to a temp file and swapped in whole, so an interrupted write keeps the old file intact. Zed and VS Code read `AGENTS.md` from the repo.
 3. Appends graph ignore rules to the global excludes file Git already uses. When `core.excludesfile` is unset, creates `~/.gitignore_global` and points `core.excludesfile` at it.
-4. Installs the `agent-harness` CLI into `~/.local/bin/`.
+4. Installs the `agent-harness` CLI into `~/.local/bin/`: `curl | bash` downloads it and the rule templates from GitHub, and `bash install.sh` inside a clone uses that clone's files.
 
 ---
 
@@ -83,7 +83,7 @@ Open **TRAE**, **Cursor**, **Claude Code**, or **Antigravity** in that project a
 > *"Please index this project and initialize the development specification."*
 
 ### What happens:
-1. **Keep What You Wrote**: An existing `AGENTS.md` stays as written. `init` appends Karpathy rules, test commands, doc alignment, and graph-search rules when those sections are missing, and leaves a file that already has them unchanged.
+1. **Keep What You Wrote**: An existing `AGENTS.md` stays as written. `init` appends Karpathy rules, test commands, doc alignment, and graph-search rules when those sections are missing, and leaves a file that already has them unchanged. A hand-written `测试与校验命令` section stays the project's only command list.
 2. **Graph Index + Stack Facts**: Indexes the project into the local knowledge graph for agents to query; the languages and entry points written to `AGENTS.md` come from filesystem rules shared with `check` / `sync`, so they never disagree and don't depend on whether the engine is installed.
 3. **Tailor-Made `AGENTS.md`**: Fills test commands from scripts and config the repo already has, plus the Karpathy rules.
 4. **Universal Import Sync**: Creates `CLAUDE.md` / `GEMINI.md` containing only `@AGENTS.md`; symlinks left by older versions (including `.cursorrules`) are migrated automatically.
@@ -99,7 +99,7 @@ agent-harness sync           # refresh <!-- agent-harness:auto:* --> fields only
 agent-harness verify         # run the test commands listed in AGENTS.md in order (the stop hooks call this)
 ```
 
-`check` needs one test command per detected stack, and any equivalent runner counts (`pytest` for `unittest`, `pnpm run test` for `npm test`, and so on); lint and type-check lines stay up to you. Download URLs, `CHANGELOG` / ADR files, and test files (`tests/`, `*_test.go`, `*.test.ts`, …) are left out of the doc check, and inside `git commit` only the staged changes count.
+`check` needs one test command per detected stack, and any equivalent runner counts (`pytest` for `unittest`, `pnpm run test` for `npm test`, and so on); lint and type-check lines stay up to you. Download URLs, `CHANGELOG` / ADR files, and test files (`tests/`, `*_test.go`, `*.test.ts`, …) are left out of the doc check, and inside `git commit` only the staged changes count. To customize a marked field (say, a test command that needs an environment variable), delete its pair of markers first; `sync` then skips that section.
 
 ---
 
@@ -136,7 +136,7 @@ Whenever you want to explore the architecture, dependency topology, and hot spot
 ```bash
 agent-harness ui
 ```
-Or open **`http://localhost:9749`** in your browser.
+Or open **`http://localhost:9749`** in your browser. The visualizer runs with the engine; when nothing answers on that port, `ui` prints how to start it and `status` marks it as not running.
 
 ---
 
@@ -155,8 +155,8 @@ Or open **`http://localhost:9749`** in your browser.
 
 * 🏗️ **Primary Architect & Engineer**: **Google Gemini (Antigravity Agent)** designed the high-concurrency streaming parser, cross-platform architecture, and autonomous self-healing test loop;
 * 🔬 **Adversarial Code Reviewer**: **Zhipu GLM-5.3 (TRAE)** executed 5 rounds of rigorous white-box auditing, surfacing edge-case bugs in test isolation, monorepo heuristics, and corrupted config recovery;
-* 🧠 **Deep Reasoning & Graph Auditor**: **DeepSeek V4 PRO (Max Thinking)** inspected the complete AST graph and independently executed the test harness, confirming 13/13 passing tests (100% green);
-* ⚖️ **Philosophical & Security Auditor**: **Anthropic Claude Sonnet 5 (Thinking)** performed a full audit of the 485-line codebase, validating the determinism of execution exit codes versus prompt instructions and verifying zero-dependency supply-chain safety;
+* 🧠 **Deep Reasoning & Graph Auditor**: **DeepSeek V4 PRO (Max Thinking)** inspected the complete AST graph and independently executed the test harness, confirming all 13 tests of that version passed (100% green);
+* ⚖️ **Philosophical & Security Auditor**: **Anthropic Claude Sonnet 5 (Thinking)** performed a full audit of the codebase, 485 lines at the time, validating the determinism of execution exit codes versus prompt instructions and verifying zero-dependency supply-chain safety;
 * 👨‍✈️ **Human Orchestrator & Principal**: **[@ArCzyL](https://github.com/ArCzyL)** directed architecture, prioritized trade-offs, and arbitrated the adversarial debate.
 
 ---

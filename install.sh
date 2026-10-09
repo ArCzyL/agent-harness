@@ -94,9 +94,13 @@ fi
 
 # 3. Install agent-harness CLI
 echo -e "📦 Installing agent-harness CLI..."
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Under `curl | bash` there is no script file, so the CLI and templates come from GitHub, never from the current directory
+SCRIPT_DIR=""
+if [ -f "${BASH_SOURCE[0]:-}" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 
-if [ -f "${SCRIPT_DIR}/bin/agent-harness" ]; then
+if [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/bin/agent-harness" ]; then
     cp "${SCRIPT_DIR}/bin/agent-harness" "${INSTALL_DIR}/agent-harness"
 else
     # Remote curl install fallback
@@ -110,10 +114,10 @@ ln -sf "${INSTALL_DIR}/agent-harness" "${INSTALL_DIR}/cbm-init"
 # 3.1 Install templates
 SHARE_DIR="${HOME}/.local/share/agent-harness/templates"
 mkdir -p "${SHARE_DIR}"
-if [ -d "${SCRIPT_DIR}/templates" ]; then
+if [ -n "${SCRIPT_DIR}" ] && [ -d "${SCRIPT_DIR}/templates" ]; then
     cp -r "${SCRIPT_DIR}/templates/"* "${SHARE_DIR}/" 2>/dev/null || true
 else
-    curl -sL "https://raw.githubusercontent.com/ArCzyL/agent-harness/main/templates/karpathy_rules.md" -o "${SHARE_DIR}/karpathy_rules.md" 2>/dev/null || true
+    curl -fsSL "https://raw.githubusercontent.com/ArCzyL/agent-harness/main/templates/karpathy_rules.md" -o "${SHARE_DIR}/karpathy_rules.md" 2>/dev/null || true
 fi
 
 # 4. Ensure ~/.local/bin in PATH

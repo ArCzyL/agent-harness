@@ -14,6 +14,10 @@ import re
 import webbrowser
 import shutil
 import tempfile
+import hashlib
+import signal
+import socket
+import time
 
 VERSION = "1.0.7"
 
@@ -29,6 +33,7 @@ if sys.platform == "win32":
 else:
     CBM_BIN = os.path.expanduser("~/.local/bin/codebase-memory-mcp")
 CBM_TIMEOUT = 600
+UI_PORT = 9749
 
 BANNER = r"""
    ___                    __     __ __                                 
@@ -389,7 +394,7 @@ AUTO_MARK = "agent-harness:auto:{name}"
 DOC_ALIGNMENT_SECTION = """### 文档与代码对齐（防下一会话漂移）
 - 下一会话会把 `AGENTS.md` 与 README / `docs/` 当作事实源：改代码时同步改文档，事实源才可信。
 - **必须同步文档**：对外行为、CLI/API、入口点、技术栈、测试命令、架构分层，以及逻辑与实现方法。代码里的做法变了，描述该做法的段落在同一次改动里改成现在的做法。
-- 交付前运行 `agent-harness check`。检查核对技术栈、入口点和测试命令。实现文件有改动时，正文里写了这些路径的说明文档（README、`docs/`、`AGENTS.md`）也在同一次改动里被修改，检查才通过。带 `<!-- agent-harness:auto:* -->` 标记的字段可用 `agent-harness sync` 刷新。**sync 只刷新带标记的字段，第 5 节业务红线始终由开发者维护。**
+- 交付前运行 `agent-harness check`。检查核对技术栈、入口点和测试命令。实现文件有改动时，正文里写了这些路径的说明文档（README、`docs/`、`AGENTS.md`）也在同一次改动里被修改，检查才通过。带 `<!-- agent-harness:auto:* -->` 标记的字段可用 `agent-harness sync` 刷新。**sync 只刷新带标记的字段，第 5 节业务红线始终由开发者维护。** 要改其中某段（例如给测试命令加环境变量）时，先删掉包住这段的那对标记再改，之后 sync 跳过这一段。
 - **只写正确做法**：写规则、文档、注释或会话总结时，每条约束都写成「做什么、怎么做」的肯定句，只写正确做法本身。
 - **长期要求写进本文件**：开发者在对话中提出、以后所有会话都要遵守的要求，当轮用肯定句写进本文件第 5 节，并在回复中说明新增了哪一条。
 - 只有测试文件改动（测试目录里的文件，以及 `*_test.go`、`*.test.ts`、`*.spec.ts`、`test_*.py` 这类测试文件）、且说明文档没有写这些测试路径时，说明文档保持原样。
@@ -527,7 +532,7 @@ def strip_auto_blocks(text):
 def path_mentioned(text, relpath):
     if not relpath:
         return False
-    pattern = r"(?<![A-Za-z0-9_-])" + re.escape(relpath) + r"(?![A-Za-z0-9_./-])"
+    pattern = r"(?<![A-Za-z0-9_-])" + re.escape(relpath) + r"(?![A-Za-z0-9_/-]|\.[A-Za-z0-9_])"
     return re.search(pattern, text) is not None
 
 def is_history_doc(rel):
@@ -588,7 +593,7 @@ def compose_supplement(existing, languages_str, entry_points_md, harness_md, kar
         chunks.append("- **核心入口点 (Entry Points)**：\n" + wrap_auto("entries", "\n" + entry_points_md + "\n"))
     if "先想再写" not in existing:
         chunks.append(karpathy_rules_md)
-    if "agent-harness:auto:harness" not in existing:
+    if "agent-harness:auto:harness" not in existing and "测试与校验命令" not in existing:
         chunks.append("### 本项目测试与校验命令：\n" + wrap_auto("harness", "\n" + harness_md + "\n") + "\n" + AUTO_VERIFY_LINE)
     if "文档与代码对齐" not in existing:
         chunks.append(DOC_ALIGNMENT_SECTION + "\n" + CLOSED_LOOP)
@@ -802,20 +807,35 @@ def load_json_config(path):
             data = {}
     return data if isinstance(data, dict) else {}
 
+def write_json_config(path, data):
+    """Write a temp file next to path, then swap it in, so an interrupted write leaves the old file whole."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = path + ".agent-harness.tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        if os.path.exists(path):
+            shutil.copymode(path, tmp_path)
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
 def safe_inject_mcp(target_path, ide_name):
     """Safely injects codebase-memory-mcp into an IDE's JSON configuration with corruption backup."""
-    os.makedirs(os.path.dirname(target_path), exist_ok=True)
     data = load_json_config(target_path)
     data.setdefault("mcpServers", {})["codebase-memory-mcp"] = {
         "command": CBM_BIN,
         "args": []
     }
-    with open(target_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    write_json_config(target_path, data)
     print(f"  ✅ Configured {ide_name} MCP: {target_path}")
 
 HOOK_COMMAND = "agent-harness verify --hook"
 HOOK_TIMEOUT = 300
+# Leaves time to report a timeout before the IDE kills the hook at HOOK_TIMEOUT
+VERIFY_BUDGET = HOOK_TIMEOUT - 30
 MAX_VERIFY_ROUNDS = 3
 # (config file, top-level defaults, keys down to the stop-hook list, entry appended to that list)
 STOP_HOOK_TARGETS = [
@@ -826,7 +846,7 @@ STOP_HOOK_TARGETS = [
     (".agents/hooks.json", {}, ["agent-harness-verify", "Stop"],
      {"type": "command", "command": HOOK_COMMAND, "timeout": HOOK_TIMEOUT}),
 ]
-VERIFY_RETRY_FILE = os.path.join(tempfile.gettempdir(), "agent-harness-verify-rounds.json")
+VERIFY_STATE_FILE = os.path.join(tempfile.gettempdir(), "agent-harness-verify.json")
 COMMAND_LINE_RE = re.compile(r"^\s*[-*]\s+\*\*[^*]+\*\*\s*[：:]\s*`([^`]+)`\s*$")
 
 def install_stop_hooks(target_dir):
@@ -846,10 +866,7 @@ def install_stop_hooks(target_dir):
         if HOOK_COMMAND in json.dumps(entries):
             continue
         entries.append(entry)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+        write_json_config(path, data)
         print("  + Stop hook: {0}".format(rel))
 
 def find_project_root(start):
@@ -875,9 +892,32 @@ def harness_commands(agents_text):
             commands.append(match.group(1).strip())
     return commands
 
-def run_harness_commands(root, echo=False):
-    """Run the AGENTS.md commands from root in order. (command, output tail) for the first failure, else None."""
+def run_shell(command, cwd, env, timeout=None):
+    """(exit code, output) of a shell command. Exit code None: it ran past timeout and was stopped with its children."""
+    # A file, unlike a pipe, lets wait() return while an orphaned child still holds the output open
+    with tempfile.TemporaryFile() as out:
+        proc = subprocess.Popen(command, shell=True, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            code = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            code = None
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+            else:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except OSError:
+                    pass
+            proc.wait()
+        out.seek(0)
+        return code, out.read().decode("utf-8", "replace").replace("\r\n", "\n")
+
+def run_harness_commands(root, echo=False, budget=None):
+    """Run the AGENTS.md commands from root in order. (command, output tail) for the first failure, else None.
+    With a budget in seconds, the command still running when it runs out is stopped and reported as the failure."""
     commands = harness_commands(_read_text(os.path.join(root, "AGENTS.md"), errors="replace"))
+    deadline = time.monotonic() + budget if budget else None
     env = dict(os.environ)
     env.setdefault("PYTHONIOENCODING", "utf-8")
     with tempfile.TemporaryDirectory() as shim_dir:
@@ -889,52 +929,82 @@ def run_harness_commands(root, echo=False):
         for command in commands:
             if echo:
                 print("▶ {0}".format(command), flush=True)
-            res = subprocess.run(command, shell=True, cwd=root, env=env, stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT, encoding="utf-8", errors="replace")
+            code, output = run_shell(command, root, env, max(deadline - time.monotonic(), 1) if deadline else None)
             if echo:
-                print(res.stdout, end="", flush=True)
-            if res.returncode != 0:
-                return command, "\n".join(res.stdout.splitlines()[-60:])
+                print(output, end="", flush=True)
+            tail = "\n".join(output.splitlines()[-60:])
+            if code is None:
+                return command, tail + (
+                    "\n\n（校验限时 {0} 秒，这条命令到时仍未结束，已被停止。请让它能自己结束：关闭 watch 模式、"
+                    "去掉等待输入的步骤；只是首次编译慢的话，先在终端完整运行一次，之后会快很多。）".format(budget))
+            if code != 0:
+                return command, tail
     return None
 
-def _count_failed_round(root, event, failed):
-    """Consecutive failing rounds for this project and conversation; resets after a pass or after the limit."""
+def tree_fingerprint(root):
+    """(dirty, digest) of HEAD, git status, and the size and mtime of each changed file; None outside a git repo."""
+    status = run_cmd(["git", "-C", root, "status", "--porcelain", "-z", "--untracked-files=all"])
+    if status.returncode != 0:
+        return None
+    top, _, head = run_cmd(["git", "-C", root, "rev-parse", "--show-toplevel", "HEAD"]).stdout.partition("\n")
+    digest = hashlib.sha1((head + status.stdout).encode("utf-8"))
+    for entry in filter(None, status.stdout.split("\0")):
+        try:
+            info = os.stat(os.path.join(top.strip(), entry[3:]))
+        except OSError:
+            continue
+        digest.update("{0}\0{1}\0{2}\0".format(entry, info.st_size, info.st_mtime_ns).encode("utf-8"))
+    return bool(status.stdout), digest.hexdigest()
+
+def _load_verify_state():
+    """{"trees": {root: fingerprint seen last}, "rounds": {root|conversation: failing rounds in a row}}"""
     try:
-        with open(VERIFY_RETRY_FILE, "r", encoding="utf-8") as f:
-            counts = json.load(f)
+        with open(VERIFY_STATE_FILE, "r", encoding="utf-8") as f:
+            state = json.load(f)
     except (OSError, ValueError):
-        counts = {}
-    if not isinstance(counts, dict):
-        counts = {}
-    key = "{0}|{1}".format(root, event.get("conversationId") or event.get("session_id") or "")
-    count = counts.get(key, 0) + 1 if failed else 0
-    if 0 < count <= MAX_VERIFY_ROUNDS:
-        counts[key] = count
-    else:
-        counts.pop(key, None)
-    try:
-        with open(VERIFY_RETRY_FILE, "w", encoding="utf-8") as f:
-            json.dump(counts, f)
-    except OSError:
-        pass
-    return count
+        state = {}
+    state = state if isinstance(state, dict) else {}
+    for key in ("trees", "rounds"):
+        if not isinstance(state.get(key), dict):
+            state[key] = {}
+    return state
 
 def verify_hook_response(root, event):
-    """Stop-hook reply in the calling IDE's format: ask the agent to keep fixing while an AGENTS.md command fails."""
+    """Stop-hook reply in the calling IDE's format: ask the agent to keep fixing while an AGENTS.md command fails.
+    The commands run only when files changed since the hook last looked, so question-only turns end at once."""
     reason = str(event.get("terminationReason", "")).lower()
     if event.get("status") in ("aborted", "error") or event.get("error") or any(
             word in reason for word in ("error", "cancel", "abort", "max_steps")):
         return {}
-    if root is None:
+    tree = tree_fingerprint(root) if root else None
+    if tree is None:
         return {}
-    dirty = run_cmd(["git", "-C", root, "status", "--porcelain"])
-    failure = run_harness_commands(root) if dirty.returncode == 0 and dirty.stdout.strip() else None
+    dirty, digest = tree
+    state = _load_verify_state()
+    last = state["trees"].get(root)
+    failure = None
+    if digest != last and (dirty or last is not None):
+        failure = run_harness_commands(root, budget=VERIFY_BUDGET)
+        # The commands may leave files of their own; the next turn compares against the tree they left
+        digest = (tree_fingerprint(root) or tree)[1]
+    state["trees"][root] = digest
     antigravity = "terminationReason" in event
     claude = "stop_hook_active" in event
+    rounds = 0
     # Cursor caps the rounds itself through loop_limit
-    if (antigravity or claude) and _count_failed_round(root, event, failure is not None) > MAX_VERIFY_ROUNDS:
-        return {}
-    if failure is None:
+    if antigravity or claude:
+        key = "{0}|{1}".format(root, event.get("conversationId") or event.get("session_id") or "")
+        rounds = state["rounds"].get(key, 0) + 1 if failure else 0
+        if 0 < rounds <= MAX_VERIFY_ROUNDS:
+            state["rounds"][key] = rounds
+        else:
+            state["rounds"].pop(key, None)
+    try:
+        with open(VERIFY_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except OSError:
+        pass
+    if failure is None or rounds > MAX_VERIFY_ROUNDS:
         return {}
     message = "自动校验未通过：`{0}`。请根据下面的输出修复，修好后简要说明改了什么。\n\n{1}".format(*failure)
     if antigravity:
@@ -1060,12 +1130,28 @@ def cmd_status():
             name = p.get("name", "")
             root = p.get("root_path", "")
             print(f"   • {name} -> {root}")
-        print("\n🌐 3D Visualizer available at: http://localhost:9749\n")
+        if ui_listening():
+            print("\n🌐 3D 图谱界面：http://localhost:{0}\n".format(UI_PORT))
+        else:
+            print("\n⚪ 3D 图谱界面没有运行，`agent-harness ui` 会说明怎么打开。\n")
         return
     print("⚠️ Could not fetch projects list from daemon.")
 
+def ui_listening():
+    """True when something accepts connections on the visualizer port."""
+    try:
+        socket.create_connection(("127.0.0.1", UI_PORT), timeout=1).close()
+    except OSError:
+        return False
+    return True
+
 def cmd_ui():
-    url = "http://localhost:9749"
+    url = "http://localhost:{0}".format(UI_PORT)
+    if not ui_listening():
+        print("⚠️ 3D 图谱界面 {0} 没有运行。它跟着 codebase-memory-mcp 引擎启动：".format(url))
+        print("   1. 打开 Cursor 等已配置该引擎的 AI 工具，再运行一次 `agent-harness ui`；")
+        print("   2. 仍打不开时运行 `codebase-memory-mcp config set ui_enabled true` 打开界面开关，然后重启 AI 工具。")
+        sys.exit(1)
     print(f"🌐 Opening {url} in your default browser...")
     webbrowser.open(url)
 

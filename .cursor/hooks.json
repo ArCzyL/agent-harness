@@ -3,8 +3,8 @@
   "hooks": {
     "stop": [
       {
-        "command": "python3 .githooks/agent-stop.py",
-        "timeout": 120,
+        "command": "python3 bin/agent-harness verify --hook",
+        "timeout": 300,
         "loop_limit": 3
       }
     ]
