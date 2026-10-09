@@ -2,53 +2,75 @@
 
 # 🛡️ agent-harness
 
-### Universal Anti-Drift Engineering Guardrail & Codebase Memory for AI Coding Agents
+### AI 智能体跨工具防漂移工程框架与代码知识图谱围栏
 
-**Stop AI Agents from Burning 99% of Your Tokens and Writing Untested Slop.**
+**杜绝 AI 每次对话盲目烧掉 99% 的 Token，终结写出未测试垃圾代码与过度设计的恶习。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-brightgreen.svg)](#-installation-30-seconds)
-[![Compatible With](https://img.shields.io/badge/Compatible%20With-TRAE%20%7C%20Cursor%20%7C%20Claude%20Code%20%7C%20Antigravity%20%7C%20Windsurf%20%7C%20Zed-orange.svg)](#-supported-ai-environments)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-brightgreen.svg)](#-极速安装30-秒搞定)
+[![Compatible With](https://img.shields.io/badge/Compatible%20With-TRAE%20%7C%20Cursor%20%7C%20Claude%20Code%20%7C%20Antigravity%20%7C%20Windsurf%20%7C%20Zed-orange.svg)](#-多工具生态全兼容)
 
-[中文文档 (Chinese)](README_CN.md) • [Features](#-key-features) • [Installation](#-installation-30-seconds) • [How It Works](#-quick-start-for-any-new-or-existing-project) • [Comparison](#-comparison) • [Acknowledgements](#-acknowledgements)
+[常用操作](#-常用操作：直接复制给-AI) • [核心特性](#-核心特性) • [极速安装](#-极速安装30-秒搞定) • [工作原理](#-快速开始针对任何新老项目) • [效益对比](#-实测效益对比) • [开源致谢](#-致谢与开源生态-acknowledgements)
 
 </div>
 
 ---
 
-## ⚡ The Problem: Why Coding Agents Fail
+## 📋 常用操作：直接复制给 AI
 
-Every developer pairing with AI coding agents (Cursor, TRAE, Claude Code, Antigravity, Windsurf) faces the exact same two fatal bottlenecks:
+在 Cursor、Claude Code、Antigravity 或 TRAE 里打开项目，把对应的那句话发给 AI，它会替你运行命令。
 
-1. **Context Amnesia & Token Burn**: The agent has zero cross-session memory. Every new window begins by blindly running full-text `grep` across hundreds of files, consuming **hundreds of thousands of tokens** just to understand basic architecture.
-2. **Cognitive Drift & Untested AI Slop**: Without strict behavioral guardrails, agents make confident wrong assumptions, overcomplicate scripts with 5 layers of premature abstractions, silently reformat working code into 600-line unreviewable diffs, and say *"I'm done!"* without running a single automated test.
+- **安装或升级 agent-harness**：在终端运行[极速安装](#-极速安装30-秒搞定)里的那条命令（Mac 和 Windows 各一条）。升级就是再运行一次。
+- **给项目装上开发规范和自动校验**（新项目，或升级 agent-harness 之后的老项目）：
+  > 在项目根目录运行 `agent-harness init .`
 
-**`agent-harness` solves both problems permanently in a single, lightweight, tool-agnostic package.**
+  每次升级 agent-harness 之后，每个老项目都再说一次，新功能才会装进这个项目；项目里已有的内容原样保留。
+- **测试命令需要特殊写法**（例如 Rust 项目编译时要加 `SQLX_OFFLINE=true`）：
+  > 把 AGENTS.md「测试与校验命令」里的命令改成带 `SQLX_OFFLINE=true` 的写法，并删掉包住这一段的 agent-harness 标记
 
----
-
-## 🚀 Key Features
-
-* 🧠 **Persistent Codebase Knowledge Graph**:
-  Powered by the open-source **[DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)** (kudos to the author and community). Uses a high-performance, single-binary C daemon to index ASTs, call graphs, routes, and type hierarchies into a local SQLite database. **Sub-millisecond queries, reducing structural exploration tokens by over 99%**.
-* 🥋 **Karpathy's 4 Golden Behavioral Rules**:
-  * **Think Before Writing**: Explicitly state assumptions; when requirements are ambiguous, list the interpretations and confirm with the developer before coding.
-  * **Simplicity First**: Write the minimum code necessary. Build only what the current task needs and keep one-off logic inline.
-  * **Surgical Edits**: Touch only what the task requires. Leave unrelated files exactly as they are; keep Git Diffs minimal and auditable.
-  * **Goal-Driven Execution**: Convert every task into verifiable criteria. Write tests first, verify in terminal before delivery.
-* 📝 **Rules That Survive Long Sessions**:
-  The generated `AGENTS.md` states every rule affirmatively as "what to do and how", describing only the correct behavior, and asks the agent to write docs, comments, and session summaries the same way. Long-term requirements you give in chat are written into `AGENTS.md` in the same turn, so the rules stay complete and correct after context compression.
-* 🔒 **Physical Test Harness (The Execution Loop)**:
-  Auto-detects Go, Rust, TypeScript/Node, and Python. When the root has no manifest for a stack, sub-projects up to two levels down get commands that run in their own directory (e.g. `cd web && pnpm test`). Test commands come from scripts and config that already exist: `scripts.test`, `scripts.lint`, `tsconfig.json`, pytest / ruff config, `Cargo.toml`, and `go.mod`. `init` also adds a stop hook for Cursor, Claude Code, and Antigravity: when an agent turn ends and files changed since the hook last looked (a commit counts; a question-only turn ends at once), `agent-harness verify` runs those commands within 270 seconds and hands any failure or timeout back to the agent (up to 3 rounds). The loop:  
-  $$\text{Code} \longrightarrow \text{Run Test} \longrightarrow \text{Auto-Fix Errors} \longrightarrow \text{All Green} \longrightarrow \text{Deliver}$$
-* 🌐 **100% IDE & Client Agnostic**:
-  MCP config is written for **TRAE, Cursor, Claude Code, Antigravity, and Windsurf**. **Zed** and **VS Code** read `AGENTS.md` from the repo; `setup` does not write an MCP file for them. Single source of truth via universal `AGENTS.md`, complemented by one-line `@AGENTS.md` import files (`CLAUDE.md`, `GEMINI.md`) instead of symlinks, so tools that read several rule files load the rules only once.
-* 🛡️ **Zero-Cloud Leakage**:
-  100% local execution. Automatically configures global and project-level `.gitignore` to prevent any local database or graph artifacts from polluting private GitHub repos.
+  删掉标记之后，`agent-harness sync` 会跳过这一段，改好的命令一直保留。
+- **打开 3D 知识图谱**：
+  > 运行 `agent-harness ui`
 
 ---
 
-## 📦 Installation (30 Seconds)
+## ⚡ 痛点背景：为什么 AI 编程经常让人抓狂？
+
+每一个使用 AI 辅助编程（Cursor、TRAE、Claude Code、Antigravity、Windsurf 等）的开发者，都深陷在两大死穴之中：
+
+1. **会话失忆与 Token 巨额消耗**：AI 编程助手跨会话没有任何持久记忆。每次新开窗口，它都要盲目地全局 `grep` 搜索几百个源文件，光是“搞清楚项目架构”这一步就要白白烧掉 **几十万个 Token**。
+2. **认知漂移与未经测试的 AI 垃圾代码（AI Slop）**：缺乏刚性工程纪律时，AI 经常会犯四种毛病：
+   - 需求稍有模糊就擅自猜测，自作主张写出 200 行方向彻底错误的废代码；
+   - 让写个简单脚本，它给你搞出 5 层抽象类和一套带工厂模式的插件系统（过度设计）；
+   - 修复 3 行小 Bug，顺手把旁边 500 行正常运行的代码全部重新格式化，Git Diff 彻底失控；
+   - 改完代码看都不看，自信满满地回复“我已经修好了”，实际上终端一跑满屏报错。
+
+**`agent-harness` 用一套独立于具体 IDE、完全轻量绿色的工程方案，从根源上一劳永逸地解决这两大难题。**
+
+---
+
+## 🚀 核心特性
+
+* 🧠 **本地持久化知识图谱（Token 消耗降低 99% 以上）**：
+  底层代码知识图谱能力基于开源项目 **[DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)**（致敬原作者与开源社区）。采用纯 C 语言编写的高性能单二进制守护引擎，将代码 AST、调用链、接口路由与类型系统持久化存入本地 SQLite，**查询延迟低于 1 毫秒，将结构性探索的 Token 消耗暴降 99% 以上**。
+* 🥋 **Karpathy 防翻车四大行为准则（行为围栏）**：
+  * **先想再写 (Think Before Writing)**：把假设说出口；需求有歧义时先向开发者确认，再动手写代码。
+  * **简单优先 (Keep It Simple)**：写解决问题所需的最少代码；只实现本次需求用到的功能。
+  * **手术式修改 (Surgical Edits)**：只改任务要求触碰的代码；无关文件保持原样，Git Diff 极小、可逐行审查。
+  * **目标驱动执行 (Goal-Driven Execution)**：将每个任务变成可量化的测试指标；交付时附上终端实际跑通的测试结果。
+* 📝 **长会话不走样的规则写法**：
+  生成的 `AGENTS.md` 全部用肯定句写成「做什么、怎么做」，只写正确做法，并要求 AI 也这样写文档、注释和会话总结；你在对话中提出的长期要求，AI 会当轮写进 `AGENTS.md`。长会话压缩上下文后，AI 读到的仍是完整、正确的规则。
+* 🔒 **物理测试闭环（Test Harness Loop）**：
+  自动嗅探项目技术栈（Go、Rust、TypeScript/Node、Python）。根目录没有某个技术栈的清单文件时，向下两层识别子项目，生成在子项目目录里执行的命令（如 `cd web && pnpm test`）。测试命令来自仓库里已经存在的脚本和配置：`scripts.test`、`scripts.lint`、`tsconfig.json`、pytest / ruff 配置、`Cargo.toml`、`go.mod`。`init` 还会为 Cursor、Claude Code、Antigravity 装好 stop hook：每轮回复结束时，若文件自上次检查后有变化（提交也算；只问问题的一轮立即结束），`agent-harness verify` 在 270 秒内执行这些命令，失败或超时都把原因发回给智能体继续修改（最多 3 轮）。闭环如下：  
+  $$\text{编写/修改代码} \longrightarrow \text{运行测试命令} \longrightarrow \text{根据报错自行修复} \longrightarrow \text{全部绿灯通过} \longrightarrow \text{交付开发者}$$
+* 🌐 **100% 跨开发工具（IDE-Agnostic）**：
+  MCP 配置写入 **TRAE、Cursor、Claude Code、Antigravity、Windsurf**。**Zed** 与 **VS Code** 直接读取仓库里的 `AGENTS.md`，`setup` 不为这两家写 MCP 文件。规则以 `AGENTS.md` 为唯一事实源，并自动生成只含一行 `@AGENTS.md` 引用的 `CLAUDE.md`、`GEMINI.md`（不用软链接，避免同时读取多个规则文件的工具重复加载）。
+* 🛡️ **私有仓库零泄露保护**：
+  100% 本地运算，不上传任何私有代码。自动配置全局与项目级 `.gitignore`，确保本地图谱数据库绝不会误推到 GitHub 私密仓库。
+
+---
+
+## 📦 极速安装（30 秒搞定）
 
 ### macOS / Linux
 ```bash
@@ -56,111 +78,111 @@ curl -fsSL https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.s
 ```
 
 ### Windows (PowerShell)
-Run PowerShell as Administrator or regular user:
+在 PowerShell 中运行（管理员或普通终端均可）：
 ```powershell
 irm https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.ps1 | iex
 ```
 
-### What the installer does automatically:
-1. Downloads the **latest official** `codebase-memory-mcp` release and activates its daemon; re-running the installer upgrades an older engine (then restart the MCP server once in any open AI tool).
-2. Writes global MCP settings for TRAE, Cursor, Claude Code, Antigravity, and Windsurf — including ones not installed yet, so they work as soon as you install them (with automated `.bak` backups on corrupted files). Each file is written to a temp file and swapped in whole, so an interrupted write keeps the old file intact. Zed and VS Code read `AGENTS.md` from the repo.
-3. Appends graph ignore rules to the global excludes file Git already uses. When `core.excludesfile` is unset, creates `~/.gitignore_global` and points `core.excludesfile` at it.
-4. Installs the `agent-harness` CLI into `~/.local/bin/`: `curl | bash` downloads it and the rule templates from GitHub, and `bash install.sh` inside a clone uses that clone's files.
+### 安装脚本会自动完成：
+1. 自动下载**官方最新版** `codebase-memory-mcp` 并启动本地守护进程；已安装旧版时重跑安装脚本即可升级（升级后需在已打开的 AI 工具里重启一次该 MCP）；
+2. 为 TRAE、Cursor、Claude Code、Antigravity、Windsurf 写入全局 MCP 配置——尚未安装的工具也会预先写好，日后安装即可直接生效（损坏配置自动生成 `.bak` 备份）。每个文件先写进临时文件再整体替换，写到一半被打断时原文件保持完好。Zed 与 VS Code 读取仓库 `AGENTS.md`；
+3. 把图谱忽略规则追加到 Git 已经在用的全局 excludes 文件；还没有 `core.excludesfile` 时，才创建 `~/.gitignore_global` 并设为该路径；
+4. 将 `agent-harness` CLI 注册到 `~/.local/bin/`：`curl | bash` 时从 GitHub 下载 CLI 和规则模板，在克隆下来的仓库里运行 `bash install.sh` 时用仓库里的文件。
 
 ---
 
-## 🛠️ Quick Start: For Any New or Existing Project
+## 🛠️ 快速开始：针对任何新老项目
 
-Whenever you enter an existing project or start an idea from scratch:
+当你进入已有项目或从零开始一个新点子时：
 
 ```bash
 cd /path/to/your/project
 agent-harness init .
 ```
 
-### Or simply talk to your AI agent:
-Open **TRAE**, **Cursor**, **Claude Code**, or **Antigravity** in that project and say:
-> *"Please index this project and initialize the development specification."*
+### 或者直接在 AI 聊天窗口里说一句话：
+在 **TRAE**、**Cursor**、**Claude Code** 或 **Antigravity** 中打开该项目，对 AI 说：
+> **“在项目根目录运行 `agent-harness init .`，为当前项目建图并初始化开发规范”**
 
-### What happens:
-1. **Keep What You Wrote**: An existing `AGENTS.md` stays as written. `init` appends Karpathy rules, test commands, doc alignment, and graph-search rules when those sections are missing, and leaves a file that already has them unchanged. A hand-written `测试与校验命令` section stays the project's only command list.
-2. **Graph Index + Stack Facts**: Indexes the project into the local knowledge graph for agents to query; the languages and entry points written to `AGENTS.md` come from filesystem rules shared with `check` / `sync`, so they never disagree and don't depend on whether the engine is installed.
-3. **Tailor-Made `AGENTS.md`**: Fills test commands from scripts and config the repo already has, plus the Karpathy rules.
-4. **Universal Import Sync**: Creates `CLAUDE.md` / `GEMINI.md` containing only `@AGENTS.md`; symlinks left by older versions (including `.cursorrules`) are migrated automatically.
-5. **Stop Hooks**: Adds `agent-harness verify --hook` to `.cursor/hooks.json`, `.claude/settings.json`, and `.agents/hooks.json`, keeping every entry already there (an unparseable file is backed up to `.bak` first). Commit these files so teammates share the loop; on a machine without the CLI the hook command is not found and blocks nothing.
+### 智能体闭环流程：
+1. **防误覆盖保护**：已有 `AGENTS.md` 时原文保留。里面还没有 Karpathy 准则、测试命令、文档对齐或知识图谱检索纪律时，`init` 在末尾补上这些段落；已经写全的文件保持不动。已有手写的「测试与校验命令」段时，这一段就是项目唯一的命令清单。
+2. **建图 + 事实推导**：为项目建立本地知识图谱供 AI 实时查询；写入 `AGENTS.md` 的语言与入口点按文件系统规则推导，与 `check` / `sync` 用同一套规则，二者永不打架，也不依赖引擎是否安装；
+3. **定制化生成 `AGENTS.md`**：按仓库里已经存在的测试脚本和配置填入测试命令，并写入 Karpathy 四大纪律；
+4. **跨工具引用同步**：自动生成只含 `@AGENTS.md` 一行的 `CLAUDE.md` / `GEMINI.md`，规则只维护一份、只加载一次；旧版本生成的软链接（含 `.cursorrules`）会自动迁移。
+5. **安装 stop hook**：把 `agent-harness verify --hook` 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，原有条目全部保留（原文件解析失败先生成 `.bak` 备份）。把这些文件提交进仓库，协作者共享同一个闭环；没装 CLI 的机器上找不到该命令，任何操作都照常进行。
 
-### Keep docs aligned (before you call the task done)
+### 交付前必须对齐文档（防止下一会话幻觉）
 
-The next chat session will treat `AGENTS.md` / README as ground truth. When the implementation changes, the paragraph that describes it changes in the same edit.
+下一会话会把 `AGENTS.md` / README 当作事实。代码里的做法变了，描述该做法的段落要在同一次改动里改掉。
 
 ```bash
-agent-harness check          # fail on stack / entry / test drift, and when a doc citing changed code was left unchanged
-agent-harness sync           # refresh <!-- agent-harness:auto:* --> fields only; never touches section 5
-agent-harness verify         # run the test commands listed in AGENTS.md in order (the stop hooks call this)
+agent-harness check          # 技术栈、入口点、测试命令不一致则失败；引用了已改代码路径的说明没一起改也失败
+agent-harness sync           # 只刷新 <!-- agent-harness:auto:* --> 托管字段，不动第 5 节业务红线
+agent-harness verify         # 按顺序执行 AGENTS.md 里列出的测试与校验命令（stop hook 调用的就是它）
 ```
 
-`check` needs one test command per detected stack, and any equivalent runner counts (`pytest` for `unittest`, `pnpm run test` for `npm test`, and so on); lint and type-check lines stay up to you. Download URLs, `CHANGELOG` / ADR files, and test files (`tests/`, `*_test.go`, `*.test.ts`, …) are left out of the doc check, and inside `git commit` only the staged changes count. To customize a marked field (say, a test command that needs an environment variable), delete its pair of markers first; `sync` then skips that section.
+`check` 要求每个识别出的技术栈在 `AGENTS.md` 里有一条测试命令，等价写法都算（`pytest` 可替代 `unittest`，`pnpm run test` 可替代 `npm test` 等）；lint 和类型检查由你决定写不写。文档检查只看说明性文档：下载链接、`CHANGELOG` / ADR 文件、测试文件（`tests/`、`*_test.go`、`*.test.ts` 等）不参与比对；`git commit` 时只核对暂存区的改动。要手动改某个带标记的字段（例如测试命令要加环境变量）时，先删掉包住它的那对标记，之后 `sync` 跳过这一段。
 
 ---
 
-## 📊 Comparison
+## 📊 实测效益对比
 
-| Metric / Feature | Traditional Agent (Raw Grep) | With `agent-harness` |
+| 指标 / 场景 | 传统纯 Prompt / Grep 模式 | 使用 `agent-harness` 之后 |
 | :--- | :---: | :---: |
-| **Architectural Exploration Tokens** | Hundreds of thousands of Tokens wasted | **Only a few thousand Tokens (-99%+)** |
-| **Query Latency** | 3 - 8 seconds | **< 1 millisecond** |
-| **Over-Engineering & Code Drift** | Frequent (unwanted abstractions) | **Blocked by Karpathy Rule 2** |
-| **Silent Breakage on Delivery** | Common (untested code) | **Blocked by Automated Test Harness** |
-| **IDE Vendor Lock-In** | High (fragmented rule formats) | **Zero (Universal AGENTS.md)** |
-| **Private Code Leak Risk** | High if using cloud vector search | **Zero (100% Local SQLite)** |
+| **多次结构性探索 Token** | 数十万 Tokens 频繁浪费 | **仅数千 Tokens (降低 99% 以上)** |
+| **架构查询延迟** | 数秒至十几秒 | **< 1 毫秒** |
+| **代码过度设计与架构漂移** | 频繁（随意添加复杂设计模式） | **被 Karpathy 准则 2 严格拦截** |
+| **交付未测试的暗坑 Bug** | 家常便饭（空口凭感觉说修好了） | **被自动化测试 Harness 物理围栏锁死** |
+| **多 IDE 规则割裂与重复维护** | 严重（各个编辑器规则格式互不通用） | **统一以 AGENTS.md 为准，全自动引用兼容** |
+| **私密代码外泄风险** | 存在（若依赖外部第三方云检索平台） | **绝对零泄露（100% 本地 SQLite 图谱）** |
 
 ---
 
-## 🌐 Supported AI Environments
+## 🌐 多工具生态全兼容
 
-| AI Tool | MCP Configuration | Rule & Context Injection |
+| AI 编程工具 | MCP 自动配置路径 | 规则与上下文识别 |
 | :--- | :--- | :--- |
-| **TRAE** | `~/Library/Application Support/TRAE SOLO CN/User/mcp.json` | Native `AGENTS.md` context toggle |
-| **Antigravity / Gemini** | `~/.gemini/config/mcp_config.json` | Native `AGENTS.md` + `~/.gemini/GEMINI.md` |
-| **Cursor** | `~/.cursor/mcp.json` | Native `AGENTS.md` |
-| **Claude Code** | `~/.claude.json` | `CLAUDE.md` imports `@AGENTS.md` |
-| **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | `AGENTS.md` integration |
-| **Zed / VS Code** | Reads repo `AGENTS.md` (`setup` writes no MCP file) | Native `AGENTS.md` support |
+| **TRAE** | `~/Library/Application Support/TRAE SOLO CN/User/mcp.json` | 原生识别 `AGENTS.md` |
+| **Antigravity / Gemini** | `~/.gemini/config/mcp_config.json` | 原生识别 `AGENTS.md` 与全局 `GEMINI.md` |
+| **Cursor** | `~/.cursor/mcp.json` | 原生识别 `AGENTS.md` |
+| **Claude Code** | `~/.claude.json` | `CLAUDE.md` 引用 `@AGENTS.md` |
+| **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | 自动读取 `AGENTS.md` |
+| **Zed / VS Code** | 读取仓库 `AGENTS.md`（`setup` 不写 MCP 文件） | 原生识别 `AGENTS.md` |
 
 ---
 
-## 🖥️ 3D Knowledge Graph Visualizer
+## 🖥️ 3D 本地知识图谱可视化看板
 
-Whenever you want to explore the architecture, dependency topology, and hot spots of your project visually:
+当你想要直观审视整个代码库的依赖拓扑、调用热点与模块架构时：
 
 ```bash
 agent-harness ui
 ```
-Or open **`http://localhost:9749`** in your browser. The visualizer runs with the engine; when nothing answers on that port, `ui` prints how to start it and `status` marks it as not running.
+或者在浏览器中直接打开：**`http://localhost:9749`**。看板跟着引擎运行；这个端口没有响应时，`ui` 会说明怎么打开它，`status` 会标出它没有运行。
 
 ---
 
-## 💖 Acknowledgements
+## 💖 致谢与开源生态 (Acknowledgements)
 
-`agent-harness` stands on the shoulders of giants. We gratefully acknowledge:
-- **[DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)**: For the high-performance C language AST knowledge graph engine and 3D visualizer (please consider starring their repository! ⭐️);
-- **Andrej Karpathy**: For articulating the 4 fundamental engineering disciplines for AI-assisted programming;
-- **Agentic AI Foundation (Linux Foundation)**: For standardizing the cross-tool `AGENTS.md` specification.
-
----
-
-## 🤖 The Crucible: Multi-LLM Adversarial Engineering & Verification
-
-`agent-harness` is designed to enforce engineering discipline on AI agents. During its inception and hardening, it embodied its own philosophy through an unprecedented **multi-round adversarial crucible across four of the world's leading frontier AI models**:
-
-* 🏗️ **Primary Architect & Engineer**: **Google Gemini (Antigravity Agent)** designed the high-concurrency streaming parser, cross-platform architecture, and autonomous self-healing test loop;
-* 🔬 **Adversarial Code Reviewer**: **Zhipu GLM-5.3 (TRAE)** executed 5 rounds of rigorous white-box auditing, surfacing edge-case bugs in test isolation, monorepo heuristics, and corrupted config recovery;
-* 🧠 **Deep Reasoning & Graph Auditor**: **DeepSeek V4 PRO (Max Thinking)** inspected the complete AST graph and independently executed the test harness, confirming all 13 tests of that version passed (100% green);
-* ⚖️ **Philosophical & Security Auditor**: **Anthropic Claude Sonnet 5 (Thinking)** performed a full audit of the codebase, 485 lines at the time, validating the determinism of execution exit codes versus prompt instructions and verifying zero-dependency supply-chain safety;
-* 👨‍✈️ **Human Orchestrator & Principal**: **[@ArCzyL](https://github.com/ArCzyL)** directed architecture, prioritized trade-offs, and arbitrated the adversarial debate.
+`agent-harness` 站在巨人的肩膀上构建，衷心致敬以下优秀的开源项目与理念倡导者：
+- **[DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)**：提供极致性能的纯 C 语言 AST 知识图谱引擎与 3D 拓扑可视化支持（欢迎前往原仓库为作者点 Star ⭐️ 支持！）；
+- **Andrej Karpathy**：为 AI 辅助编程提出了深刻的四项防翻车工程常识；
+- **Agentic AI Foundation (Linux Foundation)**：推动行业跨工具通用的 `AGENTS.md` 规范。
 
 ---
 
-## 📄 License
+## 🤖 诞生纪事：四大前沿模型红蓝对抗审计 (Multi-LLM Adversarial Engineering)
 
-Distributed under the **[MIT License](LICENSE)**.
+本项目是一套给 AI 智能体立规矩的工程护栏，而在它的开发与打磨过程中，也开创性地践行了这一套自我指涉的纪律，经历了一场**全球四大前沿大模型的多轮红蓝对抗式审查与自愈**：
+
+* 🏗️ **核心架构与系统实装 (Primary Architect & Engineer)**：**Google Gemini (Antigravity Agent)** 负责高并发流式解析设计、跨平台实现与多轮测试自愈重构；
+* 🔬 **白盒审计与对抗挑刺 (Adversarial Code Reviewer)**：**智谱 GLM-5.3 (TRAE)** 进行了 5 轮尖锐的代码审计，逼出并修复了包括单测隔离、Monorepo 嗅探与坏配置保护等深层隐患；
+* 🧠 **深度逻辑推理与图谱验证 (Deep Reasoning & Graph Auditor)**：**DeepSeek V4 PRO (Max Thinking)** 全量通读 AST 知识图谱并实跑单测套件，验证了当时 13/13 项测试 100% 绿灯与架构自洽性；
+* ⚖️ **形式化语义与安全辩论 (Philosophical & Security Auditor)**：**Anthropic Claude Sonnet 5 (Thinking)** 深度通读当时 485 行的完整源码，对“物理围栏机制”与“退出码信号确定性”进行了极高密度的学术级论证，验证了纯标准库实现的安全与透明；
+* 👨‍✈️ **人类总指挥与最终裁决者 (Human Orchestrator & Principal)**：**[@ArCzyL](https://github.com/ArCzyL)** 担任系统架构把控与多模型博弈仲裁。
+
+---
+
+## 📄 开源许可证
+
+本项目基于 **[MIT License](LICENSE)** 开源。

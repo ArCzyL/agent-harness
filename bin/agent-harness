@@ -28,7 +28,7 @@ GRAPH_IGNORE_LINES = [
     "*.graph.db*",
     "*.db.zst",
 ]
-SKIP_DIRS = {"node_modules", "target", "vendor", "venv", "dist", "build"}
+SKIP_DIRS = {"node_modules", "target", "vendor", "venv", "dist", "build", "tmp", "scratch"}
 
 if sys.platform == "win32":
     CBM_BIN = os.path.expanduser("~/.local/bin/codebase-memory-mcp.exe")

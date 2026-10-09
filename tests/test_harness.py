@@ -282,6 +282,13 @@ class TestTemplateAndArchitectureParsing(unittest.TestCase):
         langs, _entries = ah.parse_architecture(self.test_dir)
         self.assertEqual(set(part.strip() for part in langs.split(",")), {"TypeScript", "Vue"})
 
+    def test_scan_skips_tmp_and_scratch(self):
+        write(self.test_dir, "main.py", "print(1)\n")
+        write(self.test_dir, "tmp/pkg/a.ts", "export const a = 1\n")
+        write(self.test_dir, "scratch/b.ts", "export const b = 1\n")
+        langs, _entries = ah.parse_architecture(self.test_dir)
+        self.assertEqual(langs, "Python")
+
     def test_extract_json_payload_with_noisy_logs(self):
         # Simulates CBM output with fake bracket in log message, valid JSON payload, and trailing log
         noisy_stdout = """level=info msg="allocator tuning {sqlite,tree_sitter}"

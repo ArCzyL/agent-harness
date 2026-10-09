@@ -112,6 +112,8 @@
 
 - **使用者与优先级**：本项目只供开发者本人使用。开发者是中文用户、编程新手，代码全部由 AI 编写；AI 开发工具直接安装在 macOS 和 Windows 上。改进按开发者真实项目里会碰到的问题排优先级；向开发者汇报时用中文和平实的说法。
 
+- **说明文档**：README 只维护中文版 `README.md`。开发者要亲自做的操作（安装、升级、给项目装规范、改测试命令、打开图谱）写在 README 开头「常用操作」一节，每项给出可以直接发给 AI 的一句话；这些操作有变化时，在同一次改动里更新这一节。
+
 - **零依赖 + Python 3.9**：`bin/agent-harness` 只用 Python 标准库与 Python 3.9 语法（分支用 `if/elif`，类型注解用 `typing.Optional` / `typing.Union`），确保能在 macOS 自带的 Python 3.9 上运行。文件第 2 行保留 `# -*- coding: utf-8 -*-`：Windows 上的 Python 3.9 直接运行脚本时，靠这一行才能读入较长的中文行。
 
 - **保留用户内容**：`init` 在 `AGENTS.md` 不存在时创建它；文件已存在时保留原文，只在末尾追加缺失的规范段落和 `<!-- agent-harness:auto:* -->` 标记，已经写全的文件保持不动；已有「测试与校验命令」段的文件沿用这一段作为命令清单。`sync` 只改标记内的内容；`init` 把 stop hook 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，保留原有条目且只添加一次；`init` 与 `setup` 改写 IDE 配置时先写临时文件再整体替换，原文件解析失败先生成 `.bak` 备份。已有 `core.excludesfile` 时，把图谱忽略规则追加进该文件并保留原路径；还没有该配置时，才写入 `~/.gitignore_global` 并设为 excludes 文件。
