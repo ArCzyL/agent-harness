@@ -922,6 +922,15 @@ class TestCommandLine(unittest.TestCase):
             legacy.flush()
         self.assertIn("❌", raw.getvalue().decode("utf-8"))
 
+    def test_python_39_runs_the_script_with_long_chinese_lines(self):
+        with open(os.path.join(BIN_DIR, "agent-harness"), "r", encoding="utf-8") as f:
+            source = f.read()
+        # "ab" then 3-byte characters puts the 511-, 1023- and 8191-byte read boundaries inside a character
+        script = write(self.test_dir, "agent-harness", source + 'LONG = """\nab' + "中" * 3000 + '\n"""\n')
+        res = subprocess.run([sys.executable, script, "version"], capture_output=True, encoding="utf-8", errors="replace")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn(ah.VERSION, res.stdout)
+
     def test_ui_and_status_check_that_the_visualizer_answers(self):
         server = socket.socket()
         server.bind(("127.0.0.1", 0))
