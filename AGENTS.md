@@ -18,7 +18,7 @@
 - `bin/agent-harness`
 <!-- /agent-harness:auto:entries -->
 
-- **CLI 子命令**：`init` · `check` · `sync` · `setup` · `status` · `ui`
+- **CLI 子命令**：`init` · `check` · `sync` · `verify` · `setup` · `status` · `ui`
 
 ***
 
@@ -73,22 +73,22 @@
 
 - **文档与代码对齐检查**：`python3 bin/agent-harness check`
 
-- **自动执行**：以上三条命令写在 `.githooks/pre-commit`（改动时两处同步）。Cursor（`.cursor/hooks.json`）和 Antigravity（`.agents/hooks.json`）每轮回复结束时，都会通过 `.githooks/agent-stop.py` 自动运行它，失败则把报错发回给智能体继续修复（最多 3 轮）；`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
+- **自动执行**：以上三条命令写在 `.githooks/pre-commit` 和 `.github/workflows/test.yml`（改动时三处同步；CI 在 Ubuntu / Windows / macOS 上用 Python 3.9 运行它们）。Cursor（`.cursor/hooks.json`）和 Antigravity（`.agents/hooks.json`）每轮回复结束时，都会通过 `.githooks/agent-stop.py` 自动运行它。`check` 以失败退出时（技术栈、入口点、测试命令不一致，或实现文件已改而引用该路径的说明没有一起改），钩子把终端输出发回给智能体继续修改（最多 3 轮）；`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
 
 ### 文档与代码对齐（防下一会话漂移）
 
 - 下一会话会把 `AGENTS.md` 与 README / `docs/` 当作事实源：改代码时同步改文档，事实源才可信。
-- **必须同步文档**：对外行为、CLI/API、入口点、技术栈、测试命令、架构分层。
-- **纯内部实现的改动**（上述事实均未变化）：文档保持原样。
-- 交付前运行 `python3 bin/agent-harness check`。带 `<!-- agent-harness:auto:* -->` 标记的字段可用 `python3 bin/agent-harness sync` 刷新。**sync 只刷新带标记的字段，第 5 节业务红线始终由开发者维护。** 本仓库的测试命令为手写、未加 harness 标记，由开发者手动维护（含 `py_compile bin/agent-harness`）。
+- **必须同步文档**：对外行为、CLI/API、入口点、技术栈、测试命令、架构分层，以及逻辑与实现方法。代码里的做法变了，描述该做法的段落在同一次改动里改成现在的做法。
+- 交付前运行 `python3 bin/agent-harness check`。检查核对技术栈、入口点和测试命令。实现文件有改动时，正文里写了这些路径的说明文档也在同一次改动里被修改，检查才通过。带 `<!-- agent-harness:auto:* -->` 标记的字段可用 `python3 bin/agent-harness sync` 刷新。**sync 只刷新带标记的字段，第 5 节业务红线始终由开发者维护。** 本仓库的测试命令为手写、未加 harness 标记，由开发者手动维护（含 `py_compile bin/agent-harness`）。
 - **只写正确做法**：写规则、文档、注释或会话总结时，每条约束都写成「做什么、怎么做」的肯定句，只写正确做法本身。
 - **长期要求写进本文件**：开发者在对话中提出、以后所有会话都要遵守的要求，当轮用肯定句写进本文件第 5 节，并在回复中说明新增了哪一条。
+- 只有测试文件改动（测试目录里的文件，以及 `*_test.go`、`*.test.ts`、`*.spec.ts`、`test_*.py` 这类测试文件）、且说明文档没有写这些测试路径时，说明文档保持原样。
 
 **闭环铁律**：
 
 1. 测试或编译报错时，读取具体报错栈并自行修复；全部通过后才宣告任务完成；
 2. 同一个问题连续修复 3 次仍未解决（如底层依赖或设计阻塞）时，**停下来向开发者汇报具体卡点和已尝试的方案**，等待决策。
-3. 若改动改变了对外行为、入口点、技术栈或测试命令，必须同步更新 AGENTS.md（及 README / docs 对应描述），并运行 `python3 bin/agent-harness check` 直至通过。
+3. 改动了对外行为、入口点、技术栈、测试命令、逻辑或实现方法时，同步更新 AGENTS.md 及 README / docs 里的对应描述，并运行 `python3 bin/agent-harness check` 直至通过。
 
 ***
 
@@ -112,7 +112,9 @@
 
 - **零依赖 + Python 3.9**：`bin/agent-harness` 只用 Python 标准库与 Python 3.9 语法（分支用 `if/elif`，类型注解用 `typing.Optional` / `typing.Union`），确保能在 macOS 自带的 Python 3.9 上运行。
 
-- **保留用户内容**：`init` 只在 `AGENTS.md` 不存在时创建它；`sync` 只改 `<!-- agent-harness:auto:* -->` 标记内的内容；`setup` 改写 IDE 配置时，原文件解析失败先生成 `.bak` 备份。
+- **保留用户内容**：`init` 在 `AGENTS.md` 不存在时创建它；文件已存在时保留原文，只在末尾追加缺失的规范段落和 `<!-- agent-harness:auto:* -->` 标记，已经写全的文件保持不动。`sync` 只改标记内的内容；`init` 把 stop hook 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，保留原有条目且只添加一次；`init` 与 `setup` 改写 IDE 配置时，原文件解析失败先生成 `.bak` 备份。已有 `core.excludesfile` 时，把图谱忽略规则追加进该文件并保留原路径；还没有该配置时，才写入 `~/.gitignore_global` 并设为 excludes 文件。
+
+- **逻辑与说明同一改动**：改了逻辑或实现方法时，同一次改动里更新描述该行为的说明（README、`docs/`、`AGENTS.md` 的对应段落）。`agent-harness check` 在实现文件已改、且引用该路径的说明文档未出现在本次改动里时失败；智能体补上对应段落后再交付。
 
 - **测试隔离**：单元测试用 stub 替换 `run_cbm_cli` 和需要的外部命令（如 `git`），所有读写都在临时目录内完成。
 

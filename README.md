@@ -39,10 +39,10 @@ Every developer pairing with AI coding agents (Cursor, TRAE, Claude Code, Antigr
 * 📝 **Rules That Survive Long Sessions**:
   The generated `AGENTS.md` states every rule affirmatively as "what to do and how", describing only the correct behavior, and asks the agent to write docs, comments, and session summaries the same way. Long-term requirements you give in chat are written into `AGENTS.md` in the same turn, so the rules stay complete and correct after context compression.
 * 🔒 **Physical Test Harness (The Execution Loop)**:
-  Auto-detects your project's technology stack (Go, Rust, TypeScript, Python, etc., including Monorepos) and binds terminal test/lint commands. Forces the agent into an autonomous self-healing loop:  
+  Auto-detects Go, Rust, TypeScript/Node, and Python. When the root has no manifest for a stack, sub-projects up to two levels down get commands that run in their own directory (e.g. `cd web && pnpm test`). Test commands come from scripts and config that already exist: `scripts.test`, `scripts.lint`, `tsconfig.json`, pytest / ruff config, `Cargo.toml`, and `go.mod`. `init` also adds a stop hook for Cursor, Claude Code, and Antigravity: when an agent turn ends with uncommitted changes, `agent-harness verify` runs those commands and hands any failure back to the agent (up to 3 rounds). The loop:  
   $$\text{Code} \longrightarrow \text{Run Test} \longrightarrow \text{Auto-Fix Errors} \longrightarrow \text{All Green} \longrightarrow \text{Deliver}$$
 * 🌐 **100% IDE & Client Agnostic**:
-  Automatically configures and syncs across **TRAE, Cursor, Claude Code, Antigravity, Windsurf, Zed, and VS Code**. Single source of truth via universal `AGENTS.md`, complemented by one-line `@AGENTS.md` import files (`CLAUDE.md`, `GEMINI.md`) instead of symlinks, so tools that read several rule files load the rules only once.
+  MCP config is written for **TRAE, Cursor, Claude Code, Antigravity, and Windsurf**. **Zed** and **VS Code** read `AGENTS.md` from the repo; `setup` does not write an MCP file for them. Single source of truth via universal `AGENTS.md`, complemented by one-line `@AGENTS.md` import files (`CLAUDE.md`, `GEMINI.md`) instead of symlinks, so tools that read several rule files load the rules only once.
 * 🛡️ **Zero-Cloud Leakage**:
   100% local execution. Automatically configures global and project-level `.gitignore` to prevent any local database or graph artifacts from polluting private GitHub repos.
 
@@ -63,8 +63,8 @@ irm https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.ps1 | ie
 
 ### What the installer does automatically:
 1. Downloads the **latest official** `codebase-memory-mcp` release and activates its daemon; re-running the installer upgrades an older engine (then restart the MCP server once in any open AI tool).
-2. Writes global MCP settings for every supported AI editor (TRAE, Cursor, Claude Code, Antigravity, Windsurf) — including ones not installed yet, so they work as soon as you install them (with automated `.bak` backups on corrupted files).
-3. Configures global Git protection (`~/.gitignore_global`) to safeguard private repos.
+2. Writes global MCP settings for TRAE, Cursor, Claude Code, Antigravity, and Windsurf — including ones not installed yet, so they work as soon as you install them (with automated `.bak` backups on corrupted files). Zed and VS Code read `AGENTS.md` from the repo.
+3. Appends graph ignore rules to the global excludes file Git already uses. When `core.excludesfile` is unset, creates `~/.gitignore_global` and points `core.excludesfile` at it.
 4. Installs the `agent-harness` CLI into `~/.local/bin/`.
 
 ---
@@ -83,19 +83,23 @@ Open **TRAE**, **Cursor**, **Claude Code**, or **Antigravity** in that project a
 > *"Please index this project and initialize the development specification."*
 
 ### What happens:
-1. **Zero Overwrite Safety**: If you already have hand-crafted rules in `AGENTS.md`, it **never** overwrites them.
+1. **Keep What You Wrote**: An existing `AGENTS.md` stays as written. `init` appends Karpathy rules, test commands, doc alignment, and graph-search rules when those sections are missing, and leaves a file that already has them unchanged.
 2. **Graph Index + Stack Facts**: Indexes the project into the local knowledge graph for agents to query; the languages and entry points written to `AGENTS.md` come from filesystem rules shared with `check` / `sync`, so they never disagree and don't depend on whether the engine is installed.
-3. **Tailor-Made `AGENTS.md`**: Generates a project-specific specification with your stack's exact test harness and Karpathy rules.
+3. **Tailor-Made `AGENTS.md`**: Fills test commands from scripts and config the repo already has, plus the Karpathy rules.
 4. **Universal Import Sync**: Creates `CLAUDE.md` / `GEMINI.md` containing only `@AGENTS.md`; symlinks left by older versions (including `.cursorrules`) are migrated automatically.
+5. **Stop Hooks**: Adds `agent-harness verify --hook` to `.cursor/hooks.json`, `.claude/settings.json`, and `.agents/hooks.json`, keeping every entry already there (an unparseable file is backed up to `.bak` first). Commit these files so teammates share the loop; on a machine without the CLI the hook command is not found and blocks nothing.
 
 ### Keep docs aligned (before you call the task done)
 
-The next chat session will treat `AGENTS.md` / README as ground truth. If code moved and docs did not, the next agent hallucinates.
+The next chat session will treat `AGENTS.md` / README as ground truth. When the implementation changes, the paragraph that describes it changes in the same edit.
 
 ```bash
-agent-harness check          # fail if stack, entry points, or test commands drifted
+agent-harness check          # fail on stack / entry / test drift, and when a doc citing changed code was left unchanged
 agent-harness sync           # refresh <!-- agent-harness:auto:* --> fields only; never touches section 5
+agent-harness verify         # run the test commands listed in AGENTS.md in order (the stop hooks call this)
 ```
+
+`check` needs one test command per detected stack, and any equivalent runner counts (`pytest` for `unittest`, `pnpm run test` for `npm test`, and so on); lint and type-check lines stay up to you. Download URLs, `CHANGELOG` / ADR files, and test files (`tests/`, `*_test.go`, `*.test.ts`, …) are left out of the doc check, and inside `git commit` only the staged changes count.
 
 ---
 
@@ -121,7 +125,7 @@ agent-harness sync           # refresh <!-- agent-harness:auto:* --> fields only
 | **Cursor** | `~/.cursor/mcp.json` | Native `AGENTS.md` |
 | **Claude Code** | `~/.claude.json` | `CLAUDE.md` imports `@AGENTS.md` |
 | **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | `AGENTS.md` integration |
-| **Zed / VS Code** | Standard JSON configuration | Native `AGENTS.md` support |
+| **Zed / VS Code** | Reads repo `AGENTS.md` (`setup` writes no MCP file) | Native `AGENTS.md` support |
 
 ---
 

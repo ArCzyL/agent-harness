@@ -1,0 +1,36 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python 3.9
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: python
+          - os: windows-latest
+            python: python
+          # The Python 3.9 bundled with the Xcode command line tools, the interpreter bin/agent-harness targets
+          - os: macos-latest
+            python: /usr/bin/python3
+    env:
+      # Windows pipes default to the ANSI code page; tests call cmd_init directly and print emoji
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os != 'macOS'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: Python is 3.9
+        run: ${{ matrix.python }} -c "import sys; print(sys.version); assert sys.version_info[:2] == (3, 9)"
+      # Same checks as AGENTS.md section 3 and .githooks/pre-commit
+      - run: ${{ matrix.python }} -m unittest discover -s tests -v
+      - run: ${{ matrix.python }} -m py_compile bin/agent-harness
+      - run: ${{ matrix.python }} bin/agent-harness check

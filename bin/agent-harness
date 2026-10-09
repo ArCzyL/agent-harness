@@ -2,7 +2,8 @@
 """
 agent-harness CLI
 Universal AI Agent Anti-Drift Framework & Knowledge Graph Harness
-Works with TRAE, Cursor, Claude Code, Antigravity, Windsurf, Zed, and VS Code.
+MCP setup writes TRAE, Cursor, Claude Code, Antigravity, and Windsurf.
+Zed and VS Code read AGENTS.md from the repository.
 """
 
 import os
@@ -12,13 +13,22 @@ import subprocess
 import re
 import webbrowser
 import shutil
+import tempfile
 
-VERSION = "1.0.5"
+VERSION = "1.0.7"
+
+GRAPH_IGNORE_LINES = [
+    ".codebase-memory/",
+    "*.graph.db*",
+    "*.db.zst",
+]
+SKIP_DIRS = {"node_modules", "target", "vendor", "venv", "dist", "build"}
 
 if sys.platform == "win32":
     CBM_BIN = os.path.expanduser("~/.local/bin/codebase-memory-mcp.exe")
 else:
     CBM_BIN = os.path.expanduser("~/.local/bin/codebase-memory-mcp")
+CBM_TIMEOUT = 600
 
 BANNER = r"""
    ___                    __     __ __                                 
@@ -33,9 +43,10 @@ def print_help():
     print(BANNER)
     print(f"Version: {VERSION}\n")
     print("Usage:")
-    print("  agent-harness init [path]    Index codebase & bootstrap tailor-made AGENTS.md")
-    print("  agent-harness check [path]   Verify AGENTS.md matches repo stack, entry points, tests")
+    print("  agent-harness init [path]    Index codebase, bootstrap AGENTS.md, and add IDE stop hooks")
+    print("  agent-harness check [path]   Verify stack, entries, test commands, and docs citing changed code")
     print("  agent-harness sync [path]    Refresh marker-managed facts in AGENTS.md (keeps custom rules)")
+    print("  agent-harness verify [path]  Run the test commands listed in AGENTS.md (stop hooks add --hook)")
     print("  agent-harness setup          Pre-configure MCP for all supported AI IDEs (installed or not)")
     print("  agent-harness status         Show codebase memory daemon & indexed projects status")
     print("  agent-harness ui             Open the 3D Knowledge Graph UI in browser (localhost:9749)")
@@ -43,7 +54,7 @@ def print_help():
     print("  agent-harness --help         Show this help message\n")
 
 def run_cmd(cmd, check=False):
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
     if check and res.returncode != 0:
         raise RuntimeError(res.stderr.strip() or res.stdout.strip())
     return res
@@ -70,7 +81,13 @@ def run_cbm_cli(tool, params=None):
     if not os.path.exists(CBM_BIN):
         return None
     cmd = [CBM_BIN, "cli", "--json", tool]
-    res = subprocess.run(cmd, input=json.dumps(params or {}), capture_output=True, text=True)
+    try:
+        res = subprocess.run(cmd, input=json.dumps(params or {}), capture_output=True,
+                             encoding="utf-8", errors="replace", timeout=CBM_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        if os.environ.get("DEBUG"):
+            print(f"⚠️ CBM CLI could not run: {e}", file=sys.stderr)
+        return None
     output = res.stdout or ""
     parsed = extract_json_payload(output)
     if isinstance(parsed, dict) and isinstance(parsed.get("structuredContent"), dict):
@@ -137,13 +154,14 @@ def parse_architecture(target_dir):
     """Languages and entry points from filesystem rules only, so init, check and sync always agree."""
     ext_counts = {}
     ext_map = {
-        ".go": "Go", ".rs": "Rust", ".py": "Python", ".ts": "TypeScript",
-        ".js": "JavaScript", ".java": "Java", ".c": "C", ".cpp": "C++",
+        ".go": "Go", ".rs": "Rust", ".py": "Python",
+        ".ts": "TypeScript", ".tsx": "TypeScript",
+        ".js": "JavaScript", ".jsx": "JavaScript", ".mjs": "JavaScript", ".cjs": "JavaScript",
+        ".vue": "Vue", ".java": "Java", ".c": "C", ".cpp": "C++",
         ".rb": "Ruby", ".php": "PHP", ".swift": "Swift", ".kt": "Kotlin"
     }
-    skip_dirs = {"node_modules", "target", "vendor"}
     for root, dirs, files in os.walk(target_dir):
-        dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith(".")]
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
         for f in files:
             ext = os.path.splitext(f)[1].lower()
             if ext in ext_map:
@@ -173,21 +191,24 @@ def parse_architecture(target_dir):
 
     return languages_str, entry_points
 
-def has_python_bin_script(project_dir):
+def python_entry_files(project_dir):
+    """Root Python entry files and bin/ scripts (*.py or a python shebang), relative to project_dir."""
+    found = [name for name in ("app.py", "main.py", "src/main.py") if os.path.isfile(os.path.join(project_dir, name))]
     bin_dir = os.path.join(project_dir, "bin")
     if not os.path.isdir(bin_dir):
-        return False
-    for fname in os.listdir(bin_dir):
+        return found
+    for fname in sorted(os.listdir(bin_dir)):
         fpath = os.path.join(bin_dir, fname)
         if not os.path.isfile(fpath):
             continue
         if fname.endswith(".py"):
-            return True
+            found.append("bin/" + fname)
+            continue
         with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
             first_line = f.readline()
         if first_line.startswith("#!") and "python" in first_line:
-            return True
-    return False
+            found.append("bin/" + fname)
+    return found
 
 def detect_stacks(project_dir):
     """Filesystem signals used by harness synthesis and AGENTS.md alignment checks."""
@@ -199,7 +220,7 @@ def detect_stacks(project_dir):
         os.path.exists(os.path.join(project_dir, "Pipfile")) or
         any(f.endswith(".py") for f in os.listdir(project_dir) if os.path.isfile(os.path.join(project_dir, f))) or
         (os.path.isdir(os.path.join(project_dir, "tests")) and any(f.endswith(".py") for f in os.listdir(os.path.join(project_dir, "tests")))) or
-        has_python_bin_script(project_dir)
+        any(path.startswith("bin/") for path in python_entry_files(project_dir))
     )
     return {
         "rust": os.path.exists(os.path.join(project_dir, "Cargo.toml")),
@@ -208,58 +229,195 @@ def detect_stacks(project_dir):
         "python": has_python,
     }
 
+def _read_text(path, errors="strict"):
+    try:
+        with open(path, "r", encoding="utf-8", errors=errors) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+def _package_scripts(project_dir):
+    try:
+        with open(os.path.join(project_dir, "package.json"), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    scripts = data.get("scripts")
+    if not isinstance(scripts, dict):
+        return {}
+    return scripts
+
+def _node_package_manager(project_dir):
+    if os.path.isfile(os.path.join(project_dir, "pnpm-lock.yaml")):
+        return "pnpm"
+    if os.path.isfile(os.path.join(project_dir, "yarn.lock")):
+        return "yarn"
+    if os.path.isfile(os.path.join(project_dir, "bun.lock")) or os.path.isfile(os.path.join(project_dir, "bun.lockb")):
+        return "bun"
+    return "npm"
+
+STACK_MANIFESTS = {
+    "rust": ("Cargo.toml",),
+    "go": ("go.mod",),
+    "node": ("package.json",),
+    "python": ("pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "Pipfile"),
+}
+SUBPROJECT_SKIP_DIRS = SKIP_DIRS | {"tests", "test", "__tests__", "testdata", "fixtures", "examples", "example", "samples"}
+TEST_COMMANDS = {
+    "rust": ["cargo test", "cargo nextest"],
+    "go": ["go test"],
+    "node": ["npm test", "pnpm test", "yarn test", "bun run test", "npm run test", "pnpm run test", "yarn run test",
+             "bun test", "vitest", "jest", "mocha", "playwright test", "scripts.test"],
+    "python": ["pytest", "unittest", "tox", "nox"],
+}
+
+def _child_dirs(path):
+    try:
+        names = sorted(os.listdir(path))
+    except OSError:
+        return []
+    return [name for name in names if not name.startswith(".") and name not in SUBPROJECT_SKIP_DIRS
+            and os.path.isdir(os.path.join(path, name))]
+
+def _has_manifest(path, stack):
+    return any(os.path.isfile(os.path.join(path, name)) for name in STACK_MANIFESTS[stack])
+
+def stack_locations(project_dir):
+    """(stack, dir relative to project_dir) pairs; "" is the root. A stack the root lacks is looked up two levels down."""
+    root = detect_stacks(project_dir)
+    tree = [(child, _child_dirs(os.path.join(project_dir, child))) for child in _child_dirs(project_dir)]
+    found = []
+    for stack in ("rust", "go", "node", "python"):
+        if root[stack]:
+            found.append((stack, ""))
+            continue
+        for child, grandchildren in tree:
+            if _has_manifest(os.path.join(project_dir, child), stack):
+                found.append((stack, child))
+                continue
+            for name in grandchildren:
+                if _has_manifest(os.path.join(project_dir, child, name), stack):
+                    found.append((stack, child + "/" + name))
+    return found
+
+def harness_plan(project_dir):
+    """Markdown lines for AGENTS.md, plus (label, accepted test commands) per detected stack for check."""
+    lines = []
+    requirements = []
+    for stack, rel in stack_locations(project_dir):
+        base = os.path.join(project_dir, rel)
+        cd = "cd {0} && ".format(rel) if rel else ""
+        where = "（{0}）".format(rel) if rel else ""
+        label = "Python 工程" if stack == "python" else STACK_MANIFESTS[stack][0]
+        requirements.append((label + where, TEST_COMMANDS[stack]))
+
+        if stack == "rust":
+            lines.append("- **Rust 编译与测试{0}**：`{1}cargo check && cargo test`".format(where, cd))
+            lines.append("- **Rust 代码质量 (Clippy){0}**：`{1}cargo clippy --all-targets -- -D warnings`".format(where, cd))
+        elif stack == "go":
+            lines.append("- **Go 编译与单元测试{0}**：`{1}go build ./... && go test -v ./...`".format(where, cd))
+            lines.append("- **Go 静态代码检查 (Vet){0}**：`{1}go vet ./...`".format(where, cd))
+        elif stack == "node":
+            scripts = _package_scripts(base)
+            pm = _node_package_manager(base)
+            has_tsconfig = os.path.isfile(os.path.join(base, "tsconfig.json"))
+            if "test" in scripts:
+                # `bun test` starts Bun's built-in runner instead of scripts.test
+                test_cmd = "bun run test" if pm == "bun" else pm + " test"
+                typecheck = "npx tsc --noEmit && " if has_tsconfig else ""
+                lines.append("- **Node/TS 类型与测试{0}**：`{1}{2}{3}`".format(where, cd, typecheck, test_cmd))
+            else:
+                if has_tsconfig:
+                    lines.append("- **TypeScript 类型检查{0}**：`{1}npx tsc --noEmit`".format(where, cd))
+                lines.append("- **Node/TS{0}**：已有 `{1}package.json`。测试命令写进 `scripts.test` 后再执行。".format(
+                    where, rel + "/" if rel else ""))
+            if "lint" in scripts:
+                lines.append("- **Node/TS 代码风格 (Lint){0}**：`{1}{2} run lint`".format(where, cd, pm))
+        else:
+            pyproject = _read_text(os.path.join(base, "pyproject.toml"), errors="replace")
+            tests_dir = os.path.join(base, "tests")
+            test_files = [os.path.join(tests_dir, name) for name in sorted(os.listdir(tests_dir))
+                          if name.startswith("test") and name.endswith(".py")] if os.path.isdir(tests_dir) else []
+            # unittest discover reports "Ran 0 tests ... OK" on plain-assert pytest files
+            has_pytest = (
+                os.path.isfile(os.path.join(base, "pytest.ini")) or
+                os.path.isfile(os.path.join(base, "conftest.py")) or
+                os.path.isfile(os.path.join(tests_dir, "conftest.py")) or
+                "[tool.pytest" in pyproject or
+                "[tool:pytest]" in _read_text(os.path.join(base, "setup.cfg"), errors="replace") or
+                "[pytest]" in _read_text(os.path.join(base, "tox.ini"), errors="replace") or
+                (bool(test_files) and not any("unittest" in _read_text(path, errors="replace") for path in test_files))
+            )
+            has_ruff = (
+                os.path.isfile(os.path.join(base, "ruff.toml")) or
+                os.path.isfile(os.path.join(base, ".ruff.toml")) or
+                "[tool.ruff" in pyproject
+            )
+            entries = [] if rel else python_entry_files(project_dir)
+            if has_pytest:
+                lines.append("- **Python 单元测试{0}**：`{1}pytest`".format(where, cd))
+            elif test_files:
+                lines.append("- **Python 单元测试{0}**：`{1}python3 -m unittest discover -s tests -v`".format(where, cd))
+            else:
+                lines.append("- **Python 单元测试{0}**：测试写进 `tests/` 后执行 `{1}python3 -m unittest discover -s tests -v`。".format(
+                    where, cd))
+            if has_ruff:
+                lines.append("- **Python 代码质量{0}**：`{1}ruff check .`".format(where, cd))
+            elif entries:
+                lines.append("- **Python 语法检查**：`python3 -m py_compile {0}`".format(" ".join(entries)))
+
+    if not lines:
+        lines.append("- **测试验证**：`# 请在此填入该技术栈的单元测试命令（如 pytest / go test / npm test）`")
+        lines.append("- **构建检查**：`# 请在此填入该技术栈的构建/语法检查命令`")
+
+    lines.append("- **文档与代码对齐检查**：`agent-harness check`")
+    requirements.append(("文档对齐检查", ["agent-harness check"]))
+    return requirements, lines
+
 def detect_test_harness(project_dir):
     """
     Detects test commands and build tools based on files in project_dir.
     Supports multi-stack monorepos (e.g. Go backend + TS frontend, or Rust core + Python bindings).
     """
-    harness = []
-    stacks = detect_stacks(project_dir)
-
-    if stacks["rust"]:
-        harness.append("- **Rust 编译与测试**：`cargo check && cargo test`")
-        harness.append("- **Rust 代码质量 (Clippy)**：`cargo clippy --all-targets -- -D warnings`")
-
-    if stacks["go"]:
-        harness.append("- **Go 编译与单元测试**：`go build ./... && go test -v ./...`")
-        harness.append("- **Go 静态代码检查 (Vet)**：`go vet ./...`")
-
-    if stacks["node"]:
-        harness.append("- **Node/TS 类型与测试**：`npx tsc --noEmit && npm test` (或 `pnpm test` / `bun test`)")
-        harness.append("- **Node/TS 代码风格 (Lint)**：`npm run lint`")
-
-    if stacks["python"]:
-        has_pytest = (
-            os.path.exists(os.path.join(project_dir, "pytest.ini")) or
-            os.path.exists(os.path.join(project_dir, "conftest.py"))
-        )
-        if has_pytest:
-            harness.append("- **Python 单元测试**：`pytest`")
-        else:
-            harness.append("- **Python 单元测试**：`python3 -m unittest discover -s tests -v` (若安装了 pytest 也可直接执行 `pytest`)")
-        harness.append("- **Python 语法与质量**：`python3 -m py_compile <入口文件>` 或 `ruff check .`")
-
-    if not harness:
-        harness.append("- **测试验证**：`# 请在此填入该技术栈的单元测试命令（如 pytest / go test / npm test）`")
-        harness.append("- **构建检查**：`# 请在此填入该技术栈的构建/语法检查命令`")
-
-    harness.append("- **文档与代码对齐检查**：`agent-harness check`")
-    return "\n".join(harness)
+    _requirements, lines = harness_plan(project_dir)
+    return "\n".join(lines)
 
 AUTO_MARK = "agent-harness:auto:{name}"
 
 DOC_ALIGNMENT_SECTION = """### 文档与代码对齐（防下一会话漂移）
 - 下一会话会把 `AGENTS.md` 与 README / `docs/` 当作事实源：改代码时同步改文档，事实源才可信。
-- **必须同步文档**：对外行为、CLI/API、入口点、技术栈、测试命令、架构分层。
-- **纯内部实现的改动**（上述事实均未变化）：文档保持原样。
-- 交付前运行 `agent-harness check`。带 `<!-- agent-harness:auto:* -->` 标记的字段可用 `agent-harness sync` 刷新。**sync 只刷新带标记的字段，第 5 节业务红线始终由开发者维护。**
+- **必须同步文档**：对外行为、CLI/API、入口点、技术栈、测试命令、架构分层，以及逻辑与实现方法。代码里的做法变了，描述该做法的段落在同一次改动里改成现在的做法。
+- 交付前运行 `agent-harness check`。检查核对技术栈、入口点和测试命令。实现文件有改动时，正文里写了这些路径的说明文档（README、`docs/`、`AGENTS.md`）也在同一次改动里被修改，检查才通过。带 `<!-- agent-harness:auto:* -->` 标记的字段可用 `agent-harness sync` 刷新。**sync 只刷新带标记的字段，第 5 节业务红线始终由开发者维护。**
 - **只写正确做法**：写规则、文档、注释或会话总结时，每条约束都写成「做什么、怎么做」的肯定句，只写正确做法本身。
 - **长期要求写进本文件**：开发者在对话中提出、以后所有会话都要遵守的要求，当轮用肯定句写进本文件第 5 节，并在回复中说明新增了哪一条。
+- 只有测试文件改动（测试目录里的文件，以及 `*_test.go`、`*.test.ts`、`*.spec.ts`、`test_*.py` 这类测试文件）、且说明文档没有写这些测试路径时，说明文档保持原样。
+"""
+
+AUTO_VERIFY_LINE = (
+    "- **自动执行**：每轮回复结束时，Cursor / Claude Code / Antigravity 的 stop hook 运行 `agent-harness verify`，"
+    "在仓库根目录按顺序执行上面的命令；失败时把输出发回给智能体继续修改，最多 3 轮。上面每条命令都写成可以直接运行的完整命令。"
+)
+
+CLOSED_LOOP = """**闭环铁律**：
+1. 测试或编译报错时，读取具体报错栈并自行修复；全部通过后才宣告任务完成；
+2. 同一个问题连续修复 3 次仍未解决（如底层依赖或设计阻塞）时，**停下来向开发者汇报具体卡点和已尝试的方案**，等待决策。
+3. 改动了对外行为、入口点、技术栈、测试命令、逻辑或实现方法时，同步更新 AGENTS.md 及 README / docs 里的对应描述，并运行 `agent-harness check` 直至通过。
+"""
+
+GRAPH_RULES_SECTION = """## 4. 代码知识图谱检索纪律 (Codebase Memory)
+- 探索系统架构、函数定义、依赖链路或接口路由时，**若当前会话可用 `codebase-memory-mcp` 工具，优先使用它**，先精准定位，再只读取所需的代码：
+    - `get_architecture`: 快速获取系统整体拓扑、热点与分层；
+    - `search_graph`: 精准查找函数、类、结构体、接口定义；
+    - `trace_path`: 追踪上下游完整调用链，评估修改带来的“爆炸半径”；
+    - `get_code_snippet`: 精确读取目标源码，让上下文只装必要内容。
+- **若工具不可用**（未安装或未配置 MCP），直接改用常规的文件搜索与读取，照常推进任务。
 """
 
 def format_entry_points_md(entry_points):
     if entry_points:
-        return "\n".join(["- `{0}`".format(ep) for ep in entry_points[:10]])
+        return "\n".join(["- `{0}`".format(ep) for ep in entry_points])
     return "- 暂无显式 main 入口（待开发定义）"
 
 def wrap_auto(name, inner):
@@ -298,50 +456,151 @@ def alignment_issues(target_dir):
         if ep not in text:
             issues.append("入口点 `{0}` 存在于仓库，但 AGENTS.md 未列出".format(ep))
 
-    stacks = detect_stacks(target_dir)
-    stack_needles = [
-        ("rust", ["cargo"], "Cargo.toml"),
-        ("go", ["go test"], "go.mod"),
-        ("node", ["npm test", "pnpm test", "yarn test", "bun test"], "package.json"),
-        ("python", ["unittest", "pytest"], "Python 工程"),
-    ]
-    for key, needles, label in stack_needles:
-        if stacks.get(key) and not any(needle.lower() in text_l for needle in needles):
-            issues.append("检测到 {0}，但 AGENTS.md 未包含对应测试命令（{1}）".format(label, " / ".join(needles)))
+    requirements, _lines = harness_plan(target_dir)
+    for label, commands in requirements:
+        if not any(re.search(r"(?<![a-z0-9_-])" + re.escape(command.lower()), text_l) for command in commands):
+            issues.append("检测到 {0}，但 AGENTS.md 未包含对应测试命令（{1}）".format(label, " / ".join(commands[:4])))
 
     return issues
 
-def working_tree_undocumented_warning(target_dir):
-    git_meta = os.path.join(target_dir, ".git")
-    if not os.path.exists(git_meta):
+LOGIC_EXTS = {
+    ".py", ".go", ".rs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue",
+    ".java", ".c", ".cpp", ".h", ".rb", ".php", ".swift", ".kt",
+    ".sh", ".ps1", ".cmd",
+}
+AUTO_BLOCK_RE = re.compile(
+    r"<!-- agent-harness:auto:[^>]*-->.*?<!-- /agent-harness:auto:[^>]*-->",
+    re.DOTALL,
+)
+TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata"}
+TEST_FILE_RE = re.compile(r"^test_.*\.py$|_test\.(py|go)$|\.(test|spec)\.[a-z]+$")
+URL_RE = re.compile(r"https?://\S+")
+HISTORY_DOC_NAMES = {"changelog", "changes", "history"}
+HISTORY_DOC_DIRS = {"adr", "adrs", "decisions"}
+
+def list_changed_files(target_dir):
+    """Changed paths under target_dir, relative to it. Inside a git commit hook (GIT_INDEX_FILE set) only staged
+    changes count. None when the directory is not a git work tree."""
+    probe = run_cmd(["git", "-C", target_dir, "rev-parse", "--show-prefix"])
+    if probe.returncode != 0:
         return None
-    res = subprocess.run(
-        ["git", "diff", "--name-only", "HEAD"],
-        cwd=target_dir,
-        capture_output=True,
-        text=True,
-    )
+    prefix = probe.stdout.strip()
+    res = run_cmd(["git", "-C", target_dir, "status", "--porcelain", "-z", "--untracked-files=all", "--", "."])
     if res.returncode != 0:
         return None
-    files = [line.strip() for line in res.stdout.splitlines() if line.strip()]
-    code_exts = {
-        ".py", ".go", ".rs", ".ts", ".tsx", ".js", ".jsx", ".java",
-        ".c", ".cpp", ".h", ".rb", ".php", ".swift", ".kt",
-    }
-    code_changed = False
-    docs_changed = False
-    for rel in files:
-        ext = os.path.splitext(rel)[1].lower()
-        if ext == ".md":
-            docs_changed = True
-        elif ext in code_exts or rel.startswith("bin/"):
-            code_changed = True
-    if code_changed and not docs_changed:
-        return (
-            "工作区有代码改动但没有任何 Markdown 文档改动。"
-            "若涉及对外行为 / 入口点 / 测试命令 / 公共 API，请同步更新 AGENTS.md 与 README/docs。"
-        )
-    return None
+    staged_only = bool(os.environ.get("GIT_INDEX_FILE"))
+    # -z keeps non-ASCII paths unquoted; a rename entry is followed by its source path as a separate token
+    tokens = res.stdout.split("\0")
+    paths = []
+    i = 0
+    while i < len(tokens):
+        entry = tokens[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        status = entry[:2]
+        names = [entry[3:]]
+        if "R" in status or "C" in status:
+            names.append(tokens[i] if i < len(tokens) else "")
+            i += 1
+        if staged_only and status[0] in " ?!":
+            continue
+        for name in names:
+            rel = name[len(prefix):] if name.startswith(prefix) else ""
+            if rel and rel not in paths:
+                paths.append(rel)
+    return paths
+
+def is_logic_change(rel):
+    norm = rel.replace("\\", "/")
+    parts = norm.split("/")
+    if TEST_DIRS.intersection(parts[:-1]) or TEST_FILE_RE.search(parts[-1]):
+        return False
+    ext = os.path.splitext(norm)[1].lower()
+    if ext in LOGIC_EXTS:
+        return True
+    return norm.startswith("bin/") and ext == ""
+
+def strip_auto_blocks(text):
+    return AUTO_BLOCK_RE.sub("", text)
+
+def path_mentioned(text, relpath):
+    if not relpath:
+        return False
+    pattern = r"(?<![A-Za-z0-9_-])" + re.escape(relpath) + r"(?![A-Za-z0-9_./-])"
+    return re.search(pattern, text) is not None
+
+def is_history_doc(rel):
+    parts = rel.replace("\\", "/").lower().split("/")
+    return parts[-1].split(".")[0] in HISTORY_DOC_NAMES or bool(HISTORY_DOC_DIRS.intersection(parts[:-1]))
+
+def documentation_texts(target_dir):
+    """Markdown that explains current behavior. History docs (CHANGELOG, ADR), auto blocks, and URLs are left out."""
+    found = []
+    for dirpath, dirs, files in os.walk(target_dir):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
+        for name in files:
+            if not name.endswith(".md"):
+                continue
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, target_dir).replace("\\", "/")
+            if is_history_doc(rel):
+                continue
+            found.append((rel, URL_RE.sub("", strip_auto_blocks(_read_text(full, errors="replace")))))
+    return found
+
+def doc_drift_issues(target_dir):
+    """Fail when changed logic still has a stale explanation, or no explanation was updated."""
+    changed = list_changed_files(target_dir)
+    if not changed:
+        return []
+    code_paths = [path for path in changed if is_logic_change(path)]
+    if not code_paths:
+        return []
+    changed_docs = set(path for path in changed if path.replace("\\", "/").endswith(".md") and not is_history_doc(path))
+    docs = documentation_texts(target_dir)
+    issues = []
+    for path in code_paths:
+        norm = path.replace("\\", "/")
+        cited = [rel for rel, text in docs if path_mentioned(text, norm)]
+        if cited:
+            stale = [rel for rel in cited if rel not in changed_docs]
+            if stale:
+                issues.append(
+                    "代码 `{0}` 已改，这些说明仍引用它但没有一起修改：{1}。请把其中描述该行为的段落改成与代码一致。".format(
+                        norm, "、".join(stale)
+                    )
+                )
+        elif not changed_docs:
+            issues.append(
+                "代码 `{0}` 已改，说明文档没有写这个路径，本次也没有 Markdown 更新。请在 README、docs/ 或 AGENTS.md 写上这段行为现在的做法。".format(
+                    norm
+                )
+            )
+    return issues
+
+def compose_supplement(existing, languages_str, entry_points_md, harness_md, karpathy_rules_md):
+    """Append framework pieces a short AGENTS.md is missing. None when the file already has them."""
+    chunks = []
+    if "agent-harness:auto:languages" not in existing:
+        chunks.append("- **主要技术栈 / 语言**：" + wrap_auto("languages", languages_str))
+    if "agent-harness:auto:entries" not in existing:
+        chunks.append("- **核心入口点 (Entry Points)**：\n" + wrap_auto("entries", "\n" + entry_points_md + "\n"))
+    if "先想再写" not in existing:
+        chunks.append(karpathy_rules_md)
+    if "agent-harness:auto:harness" not in existing:
+        chunks.append("### 本项目测试与校验命令：\n" + wrap_auto("harness", "\n" + harness_md + "\n") + "\n" + AUTO_VERIFY_LINE)
+    if "文档与代码对齐" not in existing:
+        chunks.append(DOC_ALIGNMENT_SECTION + "\n" + CLOSED_LOOP)
+    if "search_graph" not in existing:
+        chunks.append(GRAPH_RULES_SECTION)
+    if not chunks:
+        return None
+    intro = (
+        "\n\n---\n\n## agent-harness 补充\n\n"
+        "上方原文继续生效。这里补上尚未写进本文件的工程围栏，已有句子保持原样。\n\n"
+    )
+    return existing.rstrip() + intro + "\n\n".join(chunks) + "\n"
 
 def cmd_init(target_dir):
     target_dir = os.path.abspath(target_dir)
@@ -363,22 +622,27 @@ def cmd_init(target_dir):
     elif not os.path.exists(CBM_BIN):
         print("ℹ️ Graph indexing skipped (codebase-memory-mcp not installed).")
     else:
-        print("⚠️ codebase-memory-mcp returned a result agent-harness does not understand — the engine's output "
-              "format may have changed. AGENTS.md is unaffected; update agent-harness or run with DEBUG=1 for details.")
+        print("⚠️ codebase-memory-mcp gave no usable result — the engine failed to start, timed out, or changed its "
+              "output format. AGENTS.md is unaffected; update agent-harness or run with DEBUG=1 for details.")
 
-    # Check if AGENTS.md already exists
+    print("🔍 Detecting languages, entry points & test commands...")
+    languages_str, entry_points = parse_architecture(target_dir)
+    harness_md = detect_test_harness(target_dir)
+    karpathy_rules_md = load_karpathy_rules()
+    entry_points_md = format_entry_points_md(entry_points)
+
     if os.path.exists(agents_path):
-        print(f"🛡️  AGENTS.md already exists at: {agents_path}")
-        print("⏭️  Skipping creation to protect existing rules from being overwritten.")
-        print("💡 若技术栈或测试命令已变，运行 `agent-harness sync` 刷新带标记的事实字段；交付前运行 `agent-harness check`。")
+        existing = _read_text(agents_path)
+        updated = compose_supplement(existing, languages_str, entry_points_md, harness_md, karpathy_rules_md)
+        if updated is None:
+            print(f"🛡️  AGENTS.md already has the harness sections: {agents_path}")
+            print("⏭️  Leaving existing rules in place.")
+            print("💡 若技术栈或测试命令已变，运行 `agent-harness sync` 刷新带标记的事实字段；交付前运行 `agent-harness check`。")
+        else:
+            with open(agents_path, "w", encoding="utf-8") as f:
+                f.write(updated)
+            print(f"✨ Kept the existing AGENTS.md and appended the missing harness sections: {agents_path}")
     else:
-        # Step 2: Detect stack facts
-        print("🔍 Detecting languages, entry points & test commands...")
-        languages_str, entry_points = parse_architecture(target_dir)
-        harness_md = detect_test_harness(target_dir)
-        karpathy_rules_md = load_karpathy_rules()
-        entry_points_md = format_entry_points_md(entry_points)
-
         print("📝 Synthesizing tailor-made AGENTS.md (Karpathy Rules + Test Harness)...")
         content = f"""# {project_name} AI 智能体开发规范与项目指令 (AGENTS.md)
 
@@ -408,22 +672,14 @@ def cmd_init(target_dir):
 
 ### 本项目测试与校验命令：
 {wrap_auto("harness", chr(10) + harness_md + chr(10))}
+{AUTO_VERIFY_LINE}
 
 {DOC_ALIGNMENT_SECTION}
-**闭环铁律**：
-1. 测试或编译报错时，读取具体报错栈并自行修复；全部通过后才宣告任务完成；
-2. 同一个问题连续修复 3 次仍未解决（如底层依赖或设计阻塞）时，**停下来向开发者汇报具体卡点和已尝试的方案**，等待决策。
-3. 若改动改变了对外行为、入口点、技术栈或测试命令，必须同步更新 AGENTS.md（及 README / docs 对应描述），并运行 `agent-harness check` 直至通过。
+{CLOSED_LOOP}
 
 ---
 
-## 4. 代码知识图谱检索纪律 (Codebase Memory)
-- 探索系统架构、函数定义、依赖链路或接口路由时，**若当前会话可用 `codebase-memory-mcp` 工具，优先使用它**，先精准定位，再只读取所需的代码：
-    - `get_architecture`: 快速获取系统整体拓扑、热点与分层；
-    - `search_graph`: 精准查找函数、类、结构体、接口定义；
-    - `trace_path`: 追踪上下游完整调用链，评估修改带来的“爆炸半径”；
-    - `get_code_snippet`: 精确读取目标源码，让上下文只装必要内容。
-- **若工具不可用**（未安装或未配置 MCP），直接改用常规的文件搜索与读取，照常推进任务。
+{GRAPH_RULES_SECTION}
 
 ---
 
@@ -452,13 +708,12 @@ def cmd_init(target_dir):
 
     # Step 4: Ensure gitignore safety
     git_ignore_path = os.path.join(target_dir, ".gitignore")
-    if os.path.exists(git_ignore_path):
-        with open(git_ignore_path, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
-        if ".codebase-memory" not in content:
-            with open(git_ignore_path, "a", encoding="utf-8") as f:
-                f.write("\n# codebase-memory-mcp\n.codebase-memory/\n*.graph.db*\n*.db.zst\n")
-            print("🛡️  Added .codebase-memory/ to project .gitignore")
+    if os.path.exists(git_ignore_path) and append_missing_lines(git_ignore_path, GRAPH_IGNORE_LINES):
+        print("🛡️  Added .codebase-memory/ to project .gitignore")
+
+    # Step 5: Stop hooks run the AGENTS.md commands at the end of each agent turn
+    print("🔁 Ensuring stop hooks (agent-harness verify)...")
+    install_stop_hooks(target_dir)
 
     print(f"\n🎉 [agent-harness] Ready! You can now start chatting with AI in any tool (TRAE, Cursor, Claude Code, Antigravity).\n")
 
@@ -468,19 +723,16 @@ def cmd_check(target_dir):
         print(f"❌ Error: {target_dir} is not a valid directory.")
         sys.exit(1)
 
-    warn = working_tree_undocumented_warning(target_dir)
-    if warn:
-        print("⚠️  {0}\n".format(warn))
-
     issues = alignment_issues(target_dir)
+    issues.extend(doc_drift_issues(target_dir))
     if issues:
-        print("❌ AGENTS.md 与仓库事实不对齐（会导致下一会话幻觉）：\n")
+        print("❌ AGENTS.md 与仓库事实不对齐，或说明文档没有跟上代码改动：\n")
         for item in issues:
             print("  - {0}".format(item))
-        print("\n修复：更新 AGENTS.md，或给托管字段加上 `<!-- agent-harness:auto:* -->` 后运行 `agent-harness sync`。")
+        print("\n修复：更新 AGENTS.md 的技术栈、入口点和测试命令；实现有改动时，同步改写引用这些路径的说明段落。标记字段可运行 `agent-harness sync`。")
         sys.exit(1)
 
-    print("✅ AGENTS.md 与仓库技术栈 / 入口点 / 测试命令对齐。")
+    print("✅ 技术栈、入口点、测试命令与说明文档检查通过。")
 
 def cmd_sync(target_dir):
     target_dir = os.path.abspath(target_dir)
@@ -532,27 +784,28 @@ def cmd_sync(target_dir):
             print("  - {0}".format(item))
         sys.exit(1)
 
-def safe_inject_mcp(target_path, ide_name):
-    """Safely injects codebase-memory-mcp into an IDE's JSON configuration with corruption backup."""
-    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+def load_json_config(path):
+    """JSON object stored at path; {} when missing, empty, or not an object. Unparseable files are copied to .bak first."""
     data = {}
-    if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+    if os.path.exists(path) and os.path.getsize(path) > 0:
         try:
-            with open(target_path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception as e:
-            bak_path = target_path + ".bak"
-            print(f"  ⚠️ Warning: Failed to parse existing JSON at {target_path} ({e})")
+            bak_path = path + ".bak"
+            print(f"  ⚠️ Warning: Failed to parse existing JSON at {path} ({e})")
             print(f"     Creating backup at {bak_path} before updating.")
             try:
-                shutil.copyfile(target_path, bak_path)
+                shutil.copyfile(path, bak_path)
             except Exception:
                 pass
             data = {}
+    return data if isinstance(data, dict) else {}
 
-    if not isinstance(data, dict):
-        data = {}
-
+def safe_inject_mcp(target_path, ide_name):
+    """Safely injects codebase-memory-mcp into an IDE's JSON configuration with corruption backup."""
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    data = load_json_config(target_path)
     data.setdefault("mcpServers", {})["codebase-memory-mcp"] = {
         "command": CBM_BIN,
         "args": []
@@ -561,9 +814,195 @@ def safe_inject_mcp(target_path, ide_name):
         json.dump(data, f, indent=2)
     print(f"  ✅ Configured {ide_name} MCP: {target_path}")
 
+HOOK_COMMAND = "agent-harness verify --hook"
+HOOK_TIMEOUT = 300
+MAX_VERIFY_ROUNDS = 3
+# (config file, top-level defaults, keys down to the stop-hook list, entry appended to that list)
+STOP_HOOK_TARGETS = [
+    (".cursor/hooks.json", {"version": 1}, ["hooks", "stop"],
+     {"command": HOOK_COMMAND, "timeout": HOOK_TIMEOUT, "loop_limit": MAX_VERIFY_ROUNDS}),
+    (".claude/settings.json", {}, ["hooks", "Stop"],
+     {"hooks": [{"type": "command", "command": HOOK_COMMAND, "timeout": HOOK_TIMEOUT}]}),
+    (".agents/hooks.json", {}, ["agent-harness-verify", "Stop"],
+     {"type": "command", "command": HOOK_COMMAND, "timeout": HOOK_TIMEOUT}),
+]
+VERIFY_RETRY_FILE = os.path.join(tempfile.gettempdir(), "agent-harness-verify-rounds.json")
+COMMAND_LINE_RE = re.compile(r"^\s*[-*]\s+\*\*[^*]+\*\*\s*[：:]\s*`([^`]+)`\s*$")
+
+def install_stop_hooks(target_dir):
+    """Add the verify stop hook to each IDE's project config, keeping every existing entry."""
+    for rel, defaults, keys, entry in STOP_HOOK_TARGETS:
+        path = os.path.join(target_dir, *rel.split("/"))
+        data = load_json_config(path)
+        for key, value in defaults.items():
+            data.setdefault(key, value)
+        node = data
+        for key in keys[:-1]:
+            node = node.setdefault(key, {}) if isinstance(node, dict) else None
+        entries = node.setdefault(keys[-1], []) if isinstance(node, dict) else None
+        if not isinstance(entries, list):
+            print("  ⚠️ {0} has an unexpected layout; add `{1}` as a stop hook by hand.".format(rel, HOOK_COMMAND))
+            continue
+        if HOOK_COMMAND in json.dumps(entries):
+            continue
+        entries.append(entry)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        print("  + Stop hook: {0}".format(rel))
+
+def find_project_root(start):
+    """Nearest directory at or above start that holds AGENTS.md; None when there is none."""
+    path = os.path.abspath(start)
+    while not os.path.isfile(os.path.join(path, "AGENTS.md")):
+        parent = os.path.dirname(path)
+        if parent == path:
+            return None
+        path = parent
+    return path
+
+def harness_commands(agents_text):
+    """Commands written as "- **名称**：`命令`" under the 测试与校验命令 heading. Placeholders start with #."""
+    commands = []
+    in_section = False
+    for line in agents_text.splitlines():
+        if line.startswith("#"):
+            in_section = "测试与校验命令" in line
+            continue
+        match = COMMAND_LINE_RE.match(line) if in_section else None
+        if match and not match.group(1).strip().startswith("#"):
+            commands.append(match.group(1).strip())
+    return commands
+
+def run_harness_commands(root, echo=False):
+    """Run the AGENTS.md commands from root in order. (command, output tail) for the first failure, else None."""
+    commands = harness_commands(_read_text(os.path.join(root, "AGENTS.md"), errors="replace"))
+    env = dict(os.environ)
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    with tempfile.TemporaryDirectory() as shim_dir:
+        if sys.platform == "win32":
+            # python.org installs on Windows ship python.exe only; AGENTS.md commands call python3
+            with open(os.path.join(shim_dir, "python3.cmd"), "w") as f:
+                f.write('@"{0}" %*\n'.format(sys.executable))
+            env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")
+        for command in commands:
+            if echo:
+                print("▶ {0}".format(command), flush=True)
+            res = subprocess.run(command, shell=True, cwd=root, env=env, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, encoding="utf-8", errors="replace")
+            if echo:
+                print(res.stdout, end="", flush=True)
+            if res.returncode != 0:
+                return command, "\n".join(res.stdout.splitlines()[-60:])
+    return None
+
+def _count_failed_round(root, event, failed):
+    """Consecutive failing rounds for this project and conversation; resets after a pass or after the limit."""
+    try:
+        with open(VERIFY_RETRY_FILE, "r", encoding="utf-8") as f:
+            counts = json.load(f)
+    except (OSError, ValueError):
+        counts = {}
+    if not isinstance(counts, dict):
+        counts = {}
+    key = "{0}|{1}".format(root, event.get("conversationId") or event.get("session_id") or "")
+    count = counts.get(key, 0) + 1 if failed else 0
+    if 0 < count <= MAX_VERIFY_ROUNDS:
+        counts[key] = count
+    else:
+        counts.pop(key, None)
+    try:
+        with open(VERIFY_RETRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(counts, f)
+    except OSError:
+        pass
+    return count
+
+def verify_hook_response(root, event):
+    """Stop-hook reply in the calling IDE's format: ask the agent to keep fixing while an AGENTS.md command fails."""
+    reason = str(event.get("terminationReason", "")).lower()
+    if event.get("status") in ("aborted", "error") or event.get("error") or any(
+            word in reason for word in ("error", "cancel", "abort", "max_steps")):
+        return {}
+    if root is None:
+        return {}
+    dirty = run_cmd(["git", "-C", root, "status", "--porcelain"])
+    failure = run_harness_commands(root) if dirty.returncode == 0 and dirty.stdout.strip() else None
+    antigravity = "terminationReason" in event
+    claude = "stop_hook_active" in event
+    # Cursor caps the rounds itself through loop_limit
+    if (antigravity or claude) and _count_failed_round(root, event, failure is not None) > MAX_VERIFY_ROUNDS:
+        return {}
+    if failure is None:
+        return {}
+    message = "自动校验未通过：`{0}`。请根据下面的输出修复，修好后简要说明改了什么。\n\n{1}".format(*failure)
+    if antigravity:
+        return {"decision": "continue", "reason": message}
+    if claude:
+        return {"decision": "block", "reason": message}
+    return {"followup_message": message}
+
+def cmd_verify(args):
+    hook = "--hook" in args
+    paths = [arg for arg in args if arg != "--hook"]
+    root = find_project_root(paths[0] if paths else os.getcwd())
+    if hook:
+        try:
+            event = json.loads(sys.stdin.read() or "{}")
+        except ValueError:
+            event = {}
+        print(json.dumps(verify_hook_response(root, event if isinstance(event, dict) else {}), ensure_ascii=False))
+        return
+    if root is None:
+        print("❌ 没有找到 AGENTS.md，请先运行 `agent-harness init`。")
+        sys.exit(1)
+    failure = run_harness_commands(root, echo=True)
+    if failure:
+        print("\n❌ 校验未通过：`{0}`".format(failure[0]))
+        sys.exit(1)
+    print("\n✅ AGENTS.md 里的测试与校验命令全部通过。")
+
+def append_missing_lines(path, lines):
+    existing = _read_text(path)
+    missing = [line for line in lines if line not in existing]
+    if not missing:
+        return False
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    block = ""
+    if existing and not existing.endswith("\n"):
+        block += "\n"
+    if "# codebase-memory-mcp" not in existing:
+        block += "# codebase-memory-mcp\n"
+    block += "\n".join(missing) + "\n"
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(block)
+    return True
+
+def configure_global_git_excludes():
+    """Append graph ignore rules to the excludes file git already uses. Set core.excludesfile only when unset."""
+    probe = run_cmd(["git", "config", "--global", "--get", "core.excludesfile"])
+    configured = probe.returncode == 0 and bool((probe.stdout or "").strip())
+    if configured:
+        path = os.path.expanduser(probe.stdout.strip())
+        if not os.path.isabs(path):
+            path = os.path.join(os.path.expanduser("~"), path)
+    else:
+        path = os.path.expanduser("~/.gitignore_global")
+    added = append_missing_lines(path, GRAPH_IGNORE_LINES)
+    if not configured:
+        run_cmd(["git", "config", "--global", "core.excludesfile", path])
+        print("  🛡️  Set core.excludesfile to {0}".format(path))
+    elif added:
+        print("  🛡️  Appended graph ignore rules to existing excludes file: {0}".format(path))
+    else:
+        print("  🛡️  Graph ignore rules already in {0}".format(path))
+
 def cmd_setup():
     print(BANNER)
-    print("🔧 [agent-harness] Writing MCP config for every supported AI coding tool (tools installed later pick it up automatically)...\n")
+    print("🔧 [agent-harness] Writing MCP config for TRAE, Cursor, Claude Code, Antigravity, and Windsurf...\n")
     
     # 1. TRAE
     appdata = os.environ.get("APPDATA", "")
@@ -599,13 +1038,8 @@ def cmd_setup():
     for wp in windsurf_paths:
         safe_inject_mcp(wp, "Windsurf")
 
-    # 6. Global Git protection
-    global_gitignore = os.path.expanduser("~/.gitignore_global")
-    if not os.path.exists(global_gitignore):
-        with open(global_gitignore, "w", encoding="utf-8") as f:
-            f.write("# codebase-memory-mcp\n.codebase-memory/\n*.graph.db*\n*.db.zst\n")
-    run_cmd(["git", "config", "--global", "core.excludesfile", global_gitignore])
-    print(f"  🛡️  Configured Global Git Exclude: {global_gitignore}")
+    # Zed and VS Code read AGENTS.md from the repo; setup does not write an MCP file for them.
+    configure_global_git_excludes()
 
     print("\n✨ All supported AI development tools are configured and ready!\n")
 
@@ -636,21 +1070,28 @@ def cmd_ui():
     webbrowser.open(url)
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help", "help"]:
+    # Windows pipes default to the ANSI code page, which cannot encode the emoji and Chinese text printed here
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    args = sys.argv[1:]
+    if os.path.splitext(os.path.basename(sys.argv[0]))[0] == "cbm-init":
+        args = ["init"] + args
+    if not args or args[0] in ["-h", "--help", "help"]:
         print_help()
         sys.exit(0)
 
-    subcmd = sys.argv[1].lower()
+    subcmd = args[0].lower()
+    target = args[1] if len(args) > 1 else "."
 
     if subcmd == "init":
-        target = sys.argv[2] if len(sys.argv) > 2 else "."
         cmd_init(target)
     elif subcmd == "check":
-        target = sys.argv[2] if len(sys.argv) > 2 else "."
         cmd_check(target)
     elif subcmd == "sync":
-        target = sys.argv[2] if len(sys.argv) > 2 else "."
         cmd_sync(target)
+    elif subcmd == "verify":
+        cmd_verify(args[1:])
     elif subcmd == "setup":
         cmd_setup()
     elif subcmd == "status":

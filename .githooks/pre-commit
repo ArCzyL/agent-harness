@@ -1,5 +1,5 @@
 #!/bin/sh
-# Same checks as AGENTS.md section 3; keep both lists in sync.
+# Same checks as AGENTS.md section 3 and .github/workflows/test.yml; keep the three lists in sync.
 set -e
 python3 -m unittest discover -s tests
 python3 -m py_compile bin/agent-harness

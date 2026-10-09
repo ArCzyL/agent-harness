@@ -43,10 +43,10 @@
 * 📝 **长会话不走样的规则写法**：
   生成的 `AGENTS.md` 全部用肯定句写成「做什么、怎么做」，只写正确做法，并要求 AI 也这样写文档、注释和会话总结；你在对话中提出的长期要求，AI 会当轮写进 `AGENTS.md`。长会话压缩上下文后，AI 读到的仍是完整、正确的规则。
 * 🔒 **物理测试闭环（Test Harness Loop）**：
-  自动嗅探项目技术栈（Go, Rust, TypeScript/Node, Python 等，含 Monorepo 多栈支持），自动绑定终端编译与测试命令。强制 AI 进入自动化自愈闭环：  
+  自动嗅探项目技术栈（Go、Rust、TypeScript/Node、Python）。根目录没有某个技术栈的清单文件时，向下两层识别子项目，生成在子项目目录里执行的命令（如 `cd web && pnpm test`）。测试命令来自仓库里已经存在的脚本和配置：`scripts.test`、`scripts.lint`、`tsconfig.json`、pytest / ruff 配置、`Cargo.toml`、`go.mod`。`init` 还会为 Cursor、Claude Code、Antigravity 装好 stop hook：每轮回复结束、工作区有未提交改动时，`agent-harness verify` 执行这些命令，失败时把输出发回给智能体继续修改（最多 3 轮）。闭环如下：  
   $$\text{编写/修改代码} \longrightarrow \text{运行测试命令} \longrightarrow \text{根据报错自行修复} \longrightarrow \text{全部绿灯通过} \longrightarrow \text{交付开发者}$$
 * 🌐 **100% 跨开发工具（IDE-Agnostic）**：
-  一套配置，全网通用。自动适配 **TRAE、Cursor、Claude Code、Antigravity、Windsurf、Zed、VS Code**。以 `AGENTS.md` 为唯一事实源，并自动生成只含一行 `@AGENTS.md` 引用的 `CLAUDE.md`、`GEMINI.md` 兼容各家工具生态（不用软链接，避免同时读取多个规则文件的工具重复加载）。
+  MCP 配置写入 **TRAE、Cursor、Claude Code、Antigravity、Windsurf**。**Zed** 与 **VS Code** 直接读取仓库里的 `AGENTS.md`，`setup` 不为这两家写 MCP 文件。规则以 `AGENTS.md` 为唯一事实源，并自动生成只含一行 `@AGENTS.md` 引用的 `CLAUDE.md`、`GEMINI.md`（不用软链接，避免同时读取多个规则文件的工具重复加载）。
 * 🛡️ **私有仓库零泄露保护**：
   100% 本地运算，不上传任何私有代码。自动配置全局与项目级 `.gitignore`，确保本地图谱数据库绝不会误推到 GitHub 私密仓库。
 
@@ -67,8 +67,8 @@ irm https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.ps1 | ie
 
 ### 安装脚本会自动完成：
 1. 自动下载**官方最新版** `codebase-memory-mcp` 并启动本地守护进程；已安装旧版时重跑安装脚本即可升级（升级后需在已打开的 AI 工具里重启一次该 MCP）；
-2. 为所有支持的 AI 工具（TRAE、Cursor、Claude Code、Antigravity、Windsurf 等）写入全局 MCP 配置——尚未安装的工具也会预先写好，日后安装即可直接生效（损坏配置自动生成 `.bak` 备份）；
-3. 配置全局 Git 防污染规则（`~/.gitignore_global`）；
+2. 为 TRAE、Cursor、Claude Code、Antigravity、Windsurf 写入全局 MCP 配置——尚未安装的工具也会预先写好，日后安装即可直接生效（损坏配置自动生成 `.bak` 备份）。Zed 与 VS Code 读取仓库 `AGENTS.md`；
+3. 把图谱忽略规则追加到 Git 已经在用的全局 excludes 文件；还没有 `core.excludesfile` 时，才创建 `~/.gitignore_global` 并设为该路径；
 4. 将 `agent-harness` CLI 注册到 `~/.local/bin/`。
 
 ---
@@ -87,19 +87,23 @@ agent-harness init .
 > **“为当前项目建图并初始化开发规范”**
 
 ### 智能体闭环流程：
-1. **防误覆盖保护**：若项目根目录下已有你精心编写的 `AGENTS.md`，**绝对跳过生成**，保护既有手写规则与业务红线；
+1. **防误覆盖保护**：已有 `AGENTS.md` 时原文保留。里面还没有 Karpathy 准则、测试命令、文档对齐或知识图谱检索纪律时，`init` 在末尾补上这些段落；已经写全的文件保持不动。
 2. **建图 + 事实推导**：为项目建立本地知识图谱供 AI 实时查询；写入 `AGENTS.md` 的语言与入口点按文件系统规则推导，与 `check` / `sync` 用同一套规则，二者永不打架，也不依赖引擎是否安装；
-3. **定制化生成 `AGENTS.md`**：自动根据技术栈填入专属的测试命令（Harness）与 Karpathy 四大纪律；
+3. **定制化生成 `AGENTS.md`**：按仓库里已经存在的测试脚本和配置填入测试命令，并写入 Karpathy 四大纪律；
 4. **跨工具引用同步**：自动生成只含 `@AGENTS.md` 一行的 `CLAUDE.md` / `GEMINI.md`，规则只维护一份、只加载一次；旧版本生成的软链接（含 `.cursorrules`）会自动迁移。
+5. **安装 stop hook**：把 `agent-harness verify --hook` 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，原有条目全部保留（原文件解析失败先生成 `.bak` 备份）。把这些文件提交进仓库，协作者共享同一个闭环；没装 CLI 的机器上找不到该命令，任何操作都照常进行。
 
 ### 交付前必须对齐文档（防止下一会话幻觉）
 
-下一会话会把 `AGENTS.md` / README 当作事实。代码改了、文档没改，下一窗口就会漂。
+下一会话会把 `AGENTS.md` / README 当作事实。代码里的做法变了，描述该做法的段落要在同一次改动里改掉。
 
 ```bash
-agent-harness check          # 技术栈、入口点、测试命令与 AGENTS.md 不一致则失败
+agent-harness check          # 技术栈、入口点、测试命令不一致则失败；引用了已改代码路径的说明没一起改也失败
 agent-harness sync           # 只刷新 <!-- agent-harness:auto:* --> 托管字段，不动第 5 节业务红线
+agent-harness verify         # 按顺序执行 AGENTS.md 里列出的测试与校验命令（stop hook 调用的就是它）
 ```
+
+`check` 要求每个识别出的技术栈在 `AGENTS.md` 里有一条测试命令，等价写法都算（`pytest` 可替代 `unittest`，`pnpm run test` 可替代 `npm test` 等）；lint 和类型检查由你决定写不写。文档检查只看说明性文档：下载链接、`CHANGELOG` / ADR 文件、测试文件（`tests/`、`*_test.go`、`*.test.ts` 等）不参与比对；`git commit` 时只核对暂存区的改动。
 
 ---
 
@@ -125,7 +129,7 @@ agent-harness sync           # 只刷新 <!-- agent-harness:auto:* --> 托管字
 | **Cursor** | `~/.cursor/mcp.json` | 原生识别 `AGENTS.md` |
 | **Claude Code** | `~/.claude.json` | `CLAUDE.md` 引用 `@AGENTS.md` |
 | **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | 自动读取 `AGENTS.md` |
-| **Zed / VS Code** | 标准配置路径 | 原生识别 `AGENTS.md` |
+| **Zed / VS Code** | 读取仓库 `AGENTS.md`（`setup` 不写 MCP 文件） | 原生识别 `AGENTS.md` |
 
 ---
 
