@@ -29,6 +29,7 @@ The framework consists of three tightly coupled, lightweight layers:
 │           ├── check: AGENTS.md vs repo stack / entry / test commands   │
 │           ├── sync: Refresh marker-managed facts (keeps section 5)     │
 │           ├── verify: Run AGENTS.md test commands (IDE stop hooks)     │
+│           ├── guard: Ask before git discards work (pre-command hooks)  │
 │           ├── setup: Multi-IDE MCP Auto-Configuration                  │
 │           ├── status: Healthcheck & Indexed Projects Registry          │
 │           └── ui: Open Visualizer once port 9749 answers               │
@@ -39,6 +40,7 @@ The framework consists of three tightly coupled, lightweight layers:
 │               Layer 3: Behavioral & Physical Guardrails                │
 │    ├── AGENTS.md (Karpathy 4 Rules + Auto-detected Test Harness)       │
 │    ├── Stop Hooks: .cursor / .claude / .agents -> agent-harness verify │
+│    ├── Pre-command Hooks: .cursor / .claude -> agent-harness guard     │
 │    ├── Alias Files: CLAUDE.md / GEMINI.md (one-line @AGENTS.md)       │
 │    └── Git Isolation: Global ~/.gitignore_global + Project .gitignore │
 └────────────────────────────────────────────────────────────────────────┘
@@ -56,7 +58,7 @@ The framework consists of three tightly coupled, lightweight layers:
 5. **Template Assembly**: Dynamically loads `templates/karpathy_rules.md` (with embedded fallback) to compose the finalized `AGENTS.md`.
 6. **Cross-IDE Compatibility**: Writes `CLAUDE.md` / `GEMINI.md` containing only `@AGENTS.md` (an import, not a symlink, so tools that read several rule files load the rules once and Windows needs no copy fallback). Legacy symlinks to `AGENTS.md` from older versions, including `.cursorrules`, are migrated; hand-written alias files are left untouched.
 7. **Git Safety Shielding**: Ensures `.codebase-memory/` and graph artifacts are excluded in `.gitignore`.
-8. **Stop Hooks**: Adds `agent-harness verify --hook` to `.cursor/hooks.json` (with `loop_limit: 3`), `.claude/settings.json`, and `.agents/hooks.json`. Existing entries stay, the hook is added only once, and an unparseable file is copied to `.bak` before it is rewritten. Config files are written the same way as in Flow B. See Flow D.
+8. **Hooks**: Adds the stop hook `agent-harness verify --hook` to `.cursor/hooks.json` (with `loop_limit: 3`), `.claude/settings.json`, and `.agents/hooks.json`, and the pre-command hook `agent-harness guard` to `.cursor/hooks.json` (`beforeShellExecution`, matcher `git`) and `.claude/settings.json` (`PreToolUse`, matcher `Bash`). Antigravity gets the stop hook only: a failing Antigravity `PreToolUse` hook blocks the call, so a machine without the CLI would lose every command. Existing entries stay, each hook is added only once, and an unparseable file is copied to `.bak` before it is rewritten. Config files are written the same way as in Flow B. See Flow D and Flow E.
 9. A second `init` on a file that already has those sections prints a reminder to run `agent-harness check` / `sync`.
 
 ### Flow B: Global Setup (`agent-harness setup`)
@@ -82,6 +84,11 @@ The framework consists of three tightly coupled, lightweight layers:
 3. **Hook mode (`--hook`)**: Reads the stop event as JSON on stdin and replies in the calling IDE's format: Cursor `{"followup_message": ...}`, Claude Code `{"decision": "block", "reason": ...}`, Antigravity `{"decision": "continue", "reason": ...}`. The reply carries the failing command and the last 60 lines of its output. The commands run only when the work tree changed since the hook last looked at the project: a fingerprint of `HEAD`, `git status`, and the size and modification time of each changed file is compared with the one stored after the previous stop. A question-only turn therefore ends at once, while a turn that edited or committed files is verified. On the first look at a project the commands run only if the tree has uncommitted changes. The fingerprint is stored after the commands finish, so files they create count as the new baseline. A directory outside git, an aborted or errored turn, or a directory without `AGENTS.md` gets `{}`, and the agent stops normally.
 4. **Time budget**: In hook mode the commands share 270 seconds (the hook timeout is 300). The command still running when the budget is spent is stopped together with its child processes (process group on macOS / Linux, `taskkill /T` on Windows), and the reply names it with a note to make the command finish on its own (watch mode off, no input prompts) or to run a slow first build once in a terminal.
 5. **Round limit**: At most 3 consecutive failing rounds per conversation. Cursor enforces it through `loop_limit`; for Claude Code and Antigravity the count lives in the same JSON state file in the system temp directory as the fingerprints, keyed by project and session / conversation id, and resets after a passing round or once the limit is reached.
+
+### Flow E: Git Guard (`agent-harness guard`)
+1. **Input**: Reads the pre-command event as JSON on stdin: Cursor `beforeShellExecution` carries `command`, Claude Code `PreToolUse` carries `tool_input.command`. Unparseable input gets `{}`.
+2. **Detection**: `git_danger` tokenizes the command line with `shlex` (punctuation-aware, so `&&`, `;` and `|` split it into separate calls; unbalanced quotes fall back to whitespace splitting) and checks each call whose first word, after `VAR=value` prefixes, is `git` / `git.exe`. Global options such as `-C <dir>` and `-c <key=value>` are skipped before the subcommand. A call discards work for `reset --hard`; `checkout` with `--`, `.` or `-f`; `restore` unless it is `--staged` only; `clean -f`; `push` with `--force`, `-f`, `--force-with-lease` or a `+ref`; `branch -D` or `--delete --force`; `stash drop` / `clear`. Text that only mentions git (`echo git reset --hard`, a commit message) stays allowed.
+3. **Reply**: A discarding call gets "ask" in the calling IDE's format: Cursor `{"permission": "ask", "user_message", "agent_message"}`, Claude Code `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason"}}`. The message names what is lost and quotes the git call alone. Every other command gets `{}`, so the IDE's own approval settings decide as before.
 
 ---
 

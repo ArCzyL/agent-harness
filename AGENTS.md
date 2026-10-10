@@ -18,7 +18,7 @@
 - `bin/agent-harness`
 <!-- /agent-harness:auto:entries -->
 
-- **CLI 子命令**：`init` · `check` · `sync` · `verify` · `setup` · `status` · `ui`
+- **CLI 子命令**：`init` · `check` · `sync` · `verify` · `guard` · `setup` · `status` · `ui`
 
 ***
 
@@ -29,6 +29,8 @@
 - **把假设说出口**：需求存在两种或以上的理解时，**先向开发者列出各种理解并确认，再动手写代码**；
 
 - 开发者的方案有更简单或更健壮的替代实现时，主动提出并说明理由，由开发者决定采用哪一种；
+
+- **提问附上推荐的答案**：每个问题后面写上你推荐的答案和一句理由，问法让开发者回一句「好」就等于采纳；能从代码、配置和终端查到的事实自己查，只把需要开发者拍板的决定拿去问；
 
 - 对需求理解清晰、能说出验收标准之后，再开始写代码。
 
@@ -52,9 +54,13 @@
 
 - 将每个开发/修复任务转化为**客观可验证的目标**：
 
-  - “修复 Bug” $\to$ 先构造一个能稳定复现该 Bug 的最小测试，修改代码，直到测试由红变绿；
+ - “修复 Bug” $\to$ 先构造一个能稳定复现该 Bug 的最小测试，亲眼看到它失败后再分析原因、修改代码，直到测试由红变绿；
 
-  - “添加功能” $\to$ 必须配套对应的测试用例与调用校验。
+ - “添加功能” $\to$ 必须配套对应的测试用例与调用校验。
+
+- **测试要能抓到错误**：通过对外接口验证行为；期望值写成手写的具体数值或需求里给出的例子，让代码算错时测试真的失败。
+
+- **调试输出带标记**：临时加的调试输出都带同一个唯一标记（例如 `[DEBUG-a4f2]`），交付前按这个标记搜索并全部删除。
 
 - 宣告完成时，附上刚刚在终端实际运行的测试命令及其通过结果。
 
@@ -73,7 +79,7 @@
 
 - **文档与代码对齐检查**：`python3 bin/agent-harness check`
 
-- **自动执行**：以上三条命令写在 `.githooks/pre-commit` 和 `.github/workflows/test.yml`（改动时三处同步；CI 在 Ubuntu / Windows / macOS 上用 Python 3.9 运行它们）。Cursor（`.cursor/hooks.json`）和 Antigravity（`.agents/hooks.json`）每轮回复结束时运行本仓库的 `python3 bin/agent-harness verify --hook`：文件自上次检查后有变化时，按顺序执行上面三条命令；任一条失败（例如技术栈、入口点、测试命令不一致，或实现文件已改而引用该路径的说明没有一起改），或 270 秒内没有跑完，钩子都把终端输出发回给智能体继续修改（最多 3 轮）。`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
+- **自动执行**：以上三条命令写在 `.githooks/pre-commit` 和 `.github/workflows/test.yml`（改动时三处同步；CI 在 Ubuntu / Windows / macOS 上用 Python 3.9 运行它们）。Cursor（`.cursor/hooks.json`）和 Antigravity（`.agents/hooks.json`）每轮回复结束时运行本仓库的 `python3 bin/agent-harness verify --hook`：文件自上次检查后有变化时，按顺序执行上面三条命令；任一条失败（例如技术栈、入口点、测试命令不一致，或实现文件已改而引用该路径的说明没有一起改），或 270 秒内没有跑完，钩子都把终端输出发回给智能体继续修改（最多 3 轮）。Cursor 执行含 `git` 的命令前还会运行本仓库的 `python3 bin/agent-harness guard`，会丢掉改动的 git 命令先弹框等开发者确认。`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
 
 ### 文档与代码对齐（防下一会话漂移）
 
@@ -116,11 +122,13 @@
 
 - **零依赖 + Python 3.9**：`bin/agent-harness` 只用 Python 标准库与 Python 3.9 语法（分支用 `if/elif`，类型注解用 `typing.Optional` / `typing.Union`），确保能在 macOS 自带的 Python 3.9 上运行。文件第 2 行保留 `# -*- coding: utf-8 -*-`：Windows 上的 Python 3.9 直接运行脚本时，靠这一行才能读入较长的中文行。
 
-- **保留用户内容**：`init` 在 `AGENTS.md` 不存在时创建它；文件已存在时保留原文，只在末尾追加缺失的规范段落和 `<!-- agent-harness:auto:* -->` 标记，已经写全的文件保持不动；已有「测试与校验命令」段的文件沿用这一段作为命令清单。`sync` 只改标记内的内容；`init` 把 stop hook 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，保留原有条目且只添加一次；`init` 与 `setup` 改写 IDE 配置时先写临时文件再整体替换，原文件解析失败先生成 `.bak` 备份。已有 `core.excludesfile` 时，把图谱忽略规则追加进该文件并保留原路径；还没有该配置时，才写入 `~/.gitignore_global` 并设为 excludes 文件。
+- **保留用户内容**：`init` 在 `AGENTS.md` 不存在时创建它；文件已存在时保留原文，只在末尾追加缺失的规范段落和 `<!-- agent-harness:auto:* -->` 标记，已经写全的文件保持不动；已有「测试与校验命令」段的文件沿用这一段作为命令清单。`sync` 只改标记内的内容；`init` 把 stop hook 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，把 `agent-harness guard` 合并进 `.cursor/hooks.json` 和 `.claude/settings.json`，保留原有条目且每个钩子只添加一次；`init` 与 `setup` 改写 IDE 配置时先写临时文件再整体替换，原文件解析失败先生成 `.bak` 备份。已有 `core.excludesfile` 时，把图谱忽略规则追加进该文件并保留原路径；还没有该配置时，才写入 `~/.gitignore_global` 并设为 excludes 文件。
 
 - **逻辑与说明同一改动**：改了逻辑或实现方法时，同一次改动里更新描述该行为的说明（README、`docs/`、`AGENTS.md` 的对应段落）。`agent-harness check` 在实现文件已改、且引用该路径的说明文档未出现在本次改动里时失败；智能体补上对应段落后再交付。
 
 - **测试隔离**：单元测试用 stub 替换 `run_cbm_cli` 和需要的外部命令（如 `git`），所有读写都在临时目录内完成。
+
+- **已否决方案**：开发者否决的方案，连同理由和日期写进 `docs/decisions/rejected.md`。提出新方案前先读这份记录；记录里已有的方案，等开发者重新提起时再讨论。
 
 - **三平台**：改安装或路径逻辑时，同时考虑 macOS / Linux / Windows（`install.sh`、`install.ps1`、`bin/*.cmd`）。
 

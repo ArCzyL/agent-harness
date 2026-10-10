@@ -24,6 +24,7 @@
 - **给项目装上开发规范和自动校验**（新项目，或升级 agent-harness 之后的老项目）：发给 AI「在项目根目录运行 `agent-harness init .`」。每次升级 agent-harness 之后，每个老项目都再说一次，新功能才会装进这个项目；项目里已有的内容原样保留。
 - **测试命令需要特殊写法**（例如 Rust 项目编译时要加 `SQLX_OFFLINE=true`）：发给 AI「把 AGENTS.md 测试与校验命令里的命令改成带 `SQLX_OFFLINE=true` 的写法，并删掉包住这一段的 agent-harness 标记」。删掉标记之后，`agent-harness sync` 会跳过这一段，改好的命令一直保留。
 - **打开 3D 知识图谱**：发给 AI「运行 `agent-harness ui`」。
+- **看到「这条命令会丢掉……」的确认框**：AI 要运行会丢掉改动的 git 命令。想保留改动就点 Skip（Claude Code 里选 No），再发给 AI「先运行 `git stash` 备份，再继续」；确定这些改动都不要了才点 Run（选 Yes）。这类弹框每次单独点 Run，让每一次都经过你确认。
 
 ---
 
@@ -47,14 +48,16 @@
 * 🧠 **本地持久化知识图谱（Token 消耗降低 99% 以上）**：
   底层代码知识图谱能力基于开源项目 **[DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)**（致敬原作者与开源社区）。采用纯 C 语言编写的高性能单二进制守护引擎，将代码 AST、调用链、接口路由与类型系统持久化存入本地 SQLite，**查询延迟低于 1 毫秒，将结构性探索的 Token 消耗暴降 99% 以上**。
 * 🥋 **Karpathy 防翻车四大行为准则（行为围栏）**：
-  * **先想再写 (Think Before Writing)**：把假设说出口；需求有歧义时先向开发者确认，再动手写代码。
+  * **先想再写 (Think Before Writing)**：把假设说出口；需求有歧义时先向开发者确认，再动手写代码。每个问题附上 AI 推荐的答案，你回一句「好」就等于采纳；能从代码里查到的事实 AI 自己查。
   * **简单优先 (Keep It Simple)**：写解决问题所需的最少代码；只实现本次需求用到的功能。
   * **手术式修改 (Surgical Edits)**：只改任务要求触碰的代码；无关文件保持原样，Git Diff 极小、可逐行审查。
-  * **目标驱动执行 (Goal-Driven Execution)**：将每个任务变成可量化的测试指标；交付时附上终端实际跑通的测试结果。
+  * **目标驱动执行 (Goal-Driven Execution)**：将每个任务变成可量化的测试指标；交付时附上终端实际跑通的测试结果。修 bug 先亲眼看到复现测试失败；测试的期望值写成手写的具体数值，代码算错时测试才会失败；临时调试输出带统一标记，交付前全部删掉。
 * 📝 **长会话不走样的规则写法**：
   生成的 `AGENTS.md` 全部用肯定句写成「做什么、怎么做」，只写正确做法，并要求 AI 也这样写文档、注释和会话总结；你在对话中提出的长期要求，AI 会当轮写进 `AGENTS.md`。长会话压缩上下文后，AI 读到的仍是完整、正确的规则。
 * 🔒 **物理测试闭环（Test Harness Loop）**：
   自动嗅探项目技术栈（Go、Rust、TypeScript/Node、Python）。根目录没有某个技术栈的清单文件时，向下两层识别子项目，生成在子项目目录里执行的命令（如 `cd web && pnpm test`）。测试命令来自仓库里已经存在的脚本和配置：`scripts.test`、`scripts.lint`、`tsconfig.json`、pytest / ruff 配置、`Cargo.toml`、`go.mod`。`init` 还会为 Cursor、Claude Code、Antigravity 装好 stop hook：每轮回复结束时，若文件自上次检查后有变化（提交也算；只问问题的一轮立即结束），`agent-harness verify` 在 270 秒内执行这些命令，失败或超时都把原因发回给智能体继续修改（最多 3 轮）。闭环如下：编写/修改代码 → 运行测试命令 → 根据报错自行修复 → 全部绿灯通过 → 交付开发者。
+* 🧯 **会丢代码的 git 命令先问你**：
+  `init` 还为 Cursor 和 Claude Code 装好执行命令前的钩子 `agent-harness guard`。AI 要运行 `git reset --hard`、`git checkout .` / `git checkout -- 文件`、`git restore 文件`、`git clean -f`、强制推送（`--force`、`--force-with-lease`、`+分支`）、`git branch -D`、`git stash drop` / `clear` 时，IDE 弹框用中文写明会丢掉什么，你点了 Run 才执行；普通的 `git push`、`git commit` 等照常执行。Antigravity 的这类钩子一出错就会拦下所有命令，所以 Antigravity 只装回复结束时的校验钩子。
 * 🌐 **100% 跨开发工具（IDE-Agnostic）**：
   MCP 配置写入 **TRAE、Cursor、Claude Code、Antigravity、Windsurf**。**Zed** 与 **VS Code** 直接读取仓库里的 `AGENTS.md`，`setup` 不为这两家写 MCP 文件。规则以 `AGENTS.md` 为唯一事实源，并自动生成只含一行 `@AGENTS.md` 引用的 `CLAUDE.md`、`GEMINI.md`（不用软链接，避免同时读取多个规则文件的工具重复加载）。
 * 🛡️ **私有仓库零泄露保护**：
@@ -101,7 +104,7 @@ agent-harness init .
 2. **建图 + 事实推导**：为项目建立本地知识图谱供 AI 实时查询；写入 `AGENTS.md` 的语言与入口点按文件系统规则推导，与 `check` / `sync` 用同一套规则，二者永不打架，也不依赖引擎是否安装；
 3. **定制化生成 `AGENTS.md`**：按仓库里已经存在的测试脚本和配置填入测试命令，并写入 Karpathy 四大纪律；
 4. **跨工具引用同步**：自动生成只含 `@AGENTS.md` 一行的 `CLAUDE.md` / `GEMINI.md`，规则只维护一份、只加载一次；旧版本生成的软链接（含 `.cursorrules`）会自动迁移。
-5. **安装 stop hook**：把 `agent-harness verify --hook` 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，原有条目全部保留（原文件解析失败先生成 `.bak` 备份）。把这些文件提交进仓库，协作者共享同一个闭环；没装 CLI 的机器上找不到该命令，任何操作都照常进行。
+5. **安装钩子**：把 `agent-harness verify --hook` 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，把 `agent-harness guard` 合并进 `.cursor/hooks.json`（`beforeShellExecution`）和 `.claude/settings.json`（`PreToolUse`），原有条目全部保留（原文件解析失败先生成 `.bak` 备份）。把这些文件提交进仓库，协作者共享同一个闭环；没装 CLI 的机器上找不到该命令，任何操作都照常进行。
 
 ### 交付前必须对齐文档（防止下一会话幻觉）
 
@@ -111,6 +114,7 @@ agent-harness init .
 agent-harness check          # 技术栈、入口点、测试命令不一致则失败；引用了已改代码路径的说明没一起改也失败
 agent-harness sync           # 只刷新 <!-- agent-harness:auto:* --> 托管字段，不动第 5 节业务红线
 agent-harness verify         # 按顺序执行 AGENTS.md 里列出的测试与校验命令（stop hook 调用的就是它）
+agent-harness guard          # 执行命令前的钩子调用它：会丢掉改动的 git 命令交给你确认
 ```
 
 `check` 要求每个识别出的技术栈在 `AGENTS.md` 里有一条测试命令，等价写法都算（`pytest` 可替代 `unittest`，`pnpm run test` 可替代 `npm test` 等）；lint 和类型检查由你决定写不写。文档检查只看说明性文档：下载链接、`CHANGELOG` / ADR 文件、测试文件（`tests/`、`*_test.go`、`*.test.ts` 等）不参与比对；`git commit` 时只核对暂存区的改动。要手动改某个带标记的字段（例如测试命令要加环境变量）时，先删掉包住它的那对标记，之后 `sync` 跳过这一段。
@@ -159,6 +163,7 @@ agent-harness ui
 `agent-harness` 站在巨人的肩膀上构建，衷心致敬以下优秀的开源项目与理念倡导者：
 - **[DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)**：提供极致性能的纯 C 语言 AST 知识图谱引擎与 3D 拓扑可视化支持（欢迎前往原仓库为作者点 Star ⭐️ 支持！）；
 - **Andrej Karpathy**：为 AI 辅助编程提出了深刻的四项防翻车工程常识；
+- **[mattpocock/skills](https://github.com/mattpocock/skills)**：提问附推荐答案、修 bug 先建复现、调试输出带标记、测试期望值独立于代码，以及拦截危险 git 命令的思路都来自这里；
 - **Agentic AI Foundation (Linux Foundation)**：推动行业跨工具通用的 `AGENTS.md` 规范。
 
 ---

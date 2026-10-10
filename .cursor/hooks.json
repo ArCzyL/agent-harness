@@ -7,6 +7,12 @@
         "timeout": 300,
         "loop_limit": 3
       }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "python3 bin/agent-harness guard",
+        "matcher": "git"
+      }
     ]
   }
 }

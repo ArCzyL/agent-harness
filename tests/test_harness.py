@@ -651,6 +651,16 @@ class TestDocAlignment(unittest.TestCase):
             self.assertIn("只写正确做法", text)
             self.assertIn("长期要求写进本文件", text)
 
+    def test_rules_ask_with_a_recommendation_and_keep_tests_and_debugging_honest(self):
+        ah.cmd_init(self.test_dir)
+        with open(os.path.join(self.test_dir, "AGENTS.md"), "r", encoding="utf-8") as f:
+            generated = f.read()
+        with open(os.path.join(SCRIPT_DIR, "..", "AGENTS.md"), "r", encoding="utf-8") as f:
+            repo_rules = f.read()
+        for name, text in [("generated", generated), ("fallback", ah.DEFAULT_KARPATHY_RULES), ("repo AGENTS.md", repo_rules)]:
+            for phrase in ["推荐的答案", "亲眼看到它失败", "[DEBUG-", "期望值"]:
+                self.assertIn(phrase, text, name)
+
     def test_init_graph_rule_degrades_when_tool_unavailable(self):
         ah.cmd_init(self.test_dir)
         with open(os.path.join(self.test_dir, "AGENTS.md"), "r", encoding="utf-8") as f:
@@ -987,6 +997,16 @@ class TestStopHooks(unittest.TestCase):
         antigravity = self.read_json(".agents/hooks.json")
         self.assertEqual(antigravity["agent-harness-verify"]["Stop"][0]["command"], "agent-harness verify --hook")
 
+    def test_init_installs_the_git_guard_for_cursor_and_claude_code(self):
+        ah.cmd_init(self.test_dir)
+        ah.cmd_init(self.test_dir)
+        self.assertEqual(self.read_json(".cursor/hooks.json")["hooks"]["beforeShellExecution"],
+                         [{"command": "agent-harness guard", "matcher": "git"}])
+        self.assertEqual(self.read_json(".claude/settings.json")["hooks"]["PreToolUse"],
+                         [{"matcher": "Bash", "hooks": [{"type": "command", "command": "agent-harness guard"}]}])
+        # A failing Antigravity pre-tool hook blocks every command, so Antigravity gets the stop hook only
+        self.assertNotIn("guard", json.dumps(self.read_json(".agents/hooks.json")))
+
     def test_init_merges_into_existing_hook_config_once(self):
         write(self.test_dir, ".claude/settings.json", json.dumps({
             "permissions": {"allow": ["Bash(ls)"]},
@@ -1120,6 +1140,81 @@ class TestVerify(unittest.TestCase):
             for key in keys:
                 entries = entries[key]
             self.assertEqual([e["command"] for e in entries], ["python3 {0}bin/agent-harness verify --hook".format(prefix)])
+
+
+class TestGuard(unittest.TestCase):
+    DISCARDS_WORK = [
+        "git reset --hard",
+        "git -C sub reset --hard HEAD~1",
+        "cd app && git checkout .",
+        "git checkout -- src/a.py",
+        "git checkout main -- src/a.py",
+        "git restore src/a.py",
+        "git clean -fd",
+        "git clean --force",
+        "git push --force origin main",
+        "git push -f",
+        "git push --force-with-lease=main origin main",
+        "git push origin +main",
+        "git branch -D feature",
+        "git branch --delete --force feature",
+        "git stash drop",
+        "/usr/bin/git -c core.pager=cat stash clear",
+        "git status; git reset --hard",
+        "git add . && git restore .",
+    ]
+    KEEPS_WORK = [
+        "git status",
+        "git push origin main",
+        "git push -u origin feature",
+        "git checkout -b feature",
+        "git checkout main",
+        "git restore --staged src/a.py",
+        "git reset HEAD src/a.py",
+        "git branch -d merged",
+        "git stash",
+        "git stash pop",
+        "git clean -n",
+        "git commit -m 'reset --hard'",
+        "echo git reset --hard",
+        "python3 -m unittest discover -s tests -v",
+        "git commit -m \"unbalanced",
+    ]
+
+    def test_names_what_each_discarding_git_command_loses(self):
+        for command in self.DISCARDS_WORK:
+            self.assertTrue(ah.git_danger(command), command)
+        for command in self.KEEPS_WORK:
+            self.assertIsNone(ah.git_danger(command), command)
+
+    def test_reply_asks_the_developer_in_each_ide(self):
+        cursor = ah.guard_hook_response({"hook_event_name": "beforeShellExecution",
+                                         "command": "cd \"/tmp/my app\" && sleep 2; git reset --hard"})
+        self.assertEqual(cursor["permission"], "ask")
+        self.assertIn("还没提交的改动：`git reset --hard`", cursor["user_message"])
+        self.assertNotIn("sleep", cursor["user_message"])
+        self.assertIn("Run", cursor["user_message"])
+        self.assertIn("git stash", cursor["agent_message"])
+        claude = ah.guard_hook_response({"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                                         "tool_input": {"command": "git clean -fd"}})
+        decision = claude["hookSpecificOutput"]
+        self.assertEqual((decision["hookEventName"], decision["permissionDecision"]), ("PreToolUse", "ask"))
+        self.assertIn("git clean -fd", decision["permissionDecisionReason"])
+        for event in [{"command": "git status"}, {"tool_input": {"command": "ls"}}, {"tool_input": "odd"}, {}]:
+            self.assertEqual(ah.guard_hook_response(event), {}, event)
+
+    def test_guard_command_reads_the_event_from_stdin(self):
+        script = os.path.join(BIN_DIR, "agent-harness")
+        for stdin, expected in [(json.dumps({"command": "git push --force"}), "ask"), ("not json", None), ("", None)]:
+            res = subprocess.run([sys.executable, script, "guard"], input=stdin, capture_output=True,
+                                 encoding="utf-8", errors="replace")
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(json.loads(res.stdout).get("permission"), expected, stdin)
+
+    def test_this_repo_guards_its_own_shell_commands_in_cursor(self):
+        with open(os.path.join(SCRIPT_DIR, "..", ".cursor", "hooks.json"), "r", encoding="utf-8") as f:
+            entries = json.load(f)["hooks"]["beforeShellExecution"]
+        self.assertEqual(entries, [{"command": "python3 bin/agent-harness guard", "matcher": "git"}])
 
 
 @unittest.skipIf(sys.platform == "win32", "runs install.sh with bash")

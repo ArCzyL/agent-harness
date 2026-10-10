@@ -13,6 +13,7 @@ import sys
 import json
 import subprocess
 import re
+import shlex
 import webbrowser
 import shutil
 import tempfile
@@ -50,10 +51,11 @@ def print_help():
     print(BANNER)
     print(f"Version: {VERSION}\n")
     print("Usage:")
-    print("  agent-harness init [path]    Index codebase, bootstrap AGENTS.md, and add IDE stop hooks")
+    print("  agent-harness init [path]    Index codebase, bootstrap AGENTS.md, and add IDE hooks")
     print("  agent-harness check [path]   Verify stack, entries, test commands, and docs citing changed code")
     print("  agent-harness sync [path]    Refresh marker-managed facts in AGENTS.md (keeps custom rules)")
     print("  agent-harness verify [path]  Run the test commands listed in AGENTS.md (stop hooks add --hook)")
+    print("  agent-harness guard          Ask before git commands that discard work (IDE pre-command hooks call it)")
     print("  agent-harness setup          Pre-configure MCP for all supported AI IDEs (installed or not)")
     print("  agent-harness status         Show codebase memory daemon & indexed projects status")
     print("  agent-harness ui             Open the 3D Knowledge Graph UI in browser (localhost:9749)")
@@ -124,6 +126,7 @@ DEFAULT_KARPATHY_RULES = """## 2. Karpathy 防翻车四大行为准则（The 4 G
 ### 准则 1：【先想再写 (Think Before Writing)】
 - **把假设说出口**：需求存在两种或以上的理解时，**先向开发者列出各种理解并确认，再动手写代码**；
 - 开发者的方案有更简单或更健壮的替代实现时，主动提出并说明理由，由开发者决定采用哪一种；
+- **提问附上推荐的答案**：每个问题后面写上你推荐的答案和一句理由，问法让开发者回一句「好」就等于采纳；能从代码、配置和终端查到的事实自己查，只把需要开发者拍板的决定拿去问；
 - 对需求理解清晰、能说出验收标准之后，再开始写代码。
 
 ### 准则 2：【简单优先 (Keep It Simple & Minimal)】
@@ -138,8 +141,10 @@ DEFAULT_KARPATHY_RULES = """## 2. Karpathy 防翻车四大行为准则（The 4 G
 
 ### 准则 4：【目标驱动与自检验收 (Goal-Driven Execution)】
 - 将每个开发/修复任务转化为**客观可验证的目标**：
-  - “修复 Bug” $\\to$ 先构造一个能稳定复现该 Bug 的最小测试，修改代码，直到测试由红变绿；
+  - “修复 Bug” $\\to$ 先构造一个能稳定复现该 Bug 的最小测试，亲眼看到它失败后再分析原因、修改代码，直到测试由红变绿；
   - “添加功能” $\\to$ 必须配套对应的测试用例与调用校验。
+- **测试要能抓到错误**：通过对外接口验证行为；期望值写成手写的具体数值或需求里给出的例子，让代码算错时测试真的失败。
+- **调试输出带标记**：临时加的调试输出都带同一个唯一标记（例如 `[DEBUG-a4f2]`），交付前按这个标记搜索并全部删除。
 - 宣告完成时，附上刚刚在终端实际运行的测试命令及其通过结果。"""
 
 def load_karpathy_rules():
@@ -718,9 +723,9 @@ def cmd_init(target_dir):
     if os.path.exists(git_ignore_path) and append_missing_lines(git_ignore_path, GRAPH_IGNORE_LINES):
         print("🛡️  Added .codebase-memory/ to project .gitignore")
 
-    # Step 5: Stop hooks run the AGENTS.md commands at the end of each agent turn
-    print("🔁 Ensuring stop hooks (agent-harness verify)...")
-    install_stop_hooks(target_dir)
+    # Step 5: Stop hooks run the AGENTS.md commands at the end of each agent turn; the guard asks before git discards work
+    print("🔁 Ensuring hooks (agent-harness verify, agent-harness guard)...")
+    install_hooks(target_dir)
 
     print(f"\n🎉 [agent-harness] Ready! You can now start chatting with AI in any tool (TRAE, Cursor, Claude Code, Antigravity).\n")
 
@@ -839,21 +844,27 @@ HOOK_TIMEOUT = 300
 # Leaves time to report a timeout before the IDE kills the hook at HOOK_TIMEOUT
 VERIFY_BUDGET = HOOK_TIMEOUT - 30
 MAX_VERIFY_ROUNDS = 3
-# (config file, top-level defaults, keys down to the stop-hook list, entry appended to that list)
-STOP_HOOK_TARGETS = [
-    (".cursor/hooks.json", {"version": 1}, ["hooks", "stop"],
+GUARD_COMMAND = "agent-harness guard"
+# (config file, top-level defaults, keys down to the hook list, command, entry appended to that list)
+# Antigravity blocks every command when a pre-tool hook fails (e.g. the CLI is missing), so it gets the stop hook only
+HOOK_TARGETS = [
+    (".cursor/hooks.json", {"version": 1}, ["hooks", "stop"], HOOK_COMMAND,
      {"command": HOOK_COMMAND, "timeout": HOOK_TIMEOUT, "loop_limit": MAX_VERIFY_ROUNDS}),
-    (".claude/settings.json", {}, ["hooks", "Stop"],
+    (".claude/settings.json", {}, ["hooks", "Stop"], HOOK_COMMAND,
      {"hooks": [{"type": "command", "command": HOOK_COMMAND, "timeout": HOOK_TIMEOUT}]}),
-    (".agents/hooks.json", {}, ["agent-harness-verify", "Stop"],
+    (".agents/hooks.json", {}, ["agent-harness-verify", "Stop"], HOOK_COMMAND,
      {"type": "command", "command": HOOK_COMMAND, "timeout": HOOK_TIMEOUT}),
+    (".cursor/hooks.json", {"version": 1}, ["hooks", "beforeShellExecution"], GUARD_COMMAND,
+     {"command": GUARD_COMMAND, "matcher": "git"}),
+    (".claude/settings.json", {}, ["hooks", "PreToolUse"], GUARD_COMMAND,
+     {"matcher": "Bash", "hooks": [{"type": "command", "command": GUARD_COMMAND}]}),
 ]
 VERIFY_STATE_FILE = os.path.join(tempfile.gettempdir(), "agent-harness-verify.json")
 COMMAND_LINE_RE = re.compile(r"^\s*[-*]\s+\*\*[^*]+\*\*\s*[：:]\s*`([^`]+)`\s*$")
 
-def install_stop_hooks(target_dir):
-    """Add the verify stop hook to each IDE's project config, keeping every existing entry."""
-    for rel, defaults, keys, entry in STOP_HOOK_TARGETS:
+def install_hooks(target_dir):
+    """Add the verify stop hook and the git guard to each IDE's project config, keeping every existing entry."""
+    for rel, defaults, keys, command, entry in HOOK_TARGETS:
         path = os.path.join(target_dir, *rel.split("/"))
         data = load_json_config(path)
         for key, value in defaults.items():
@@ -863,13 +874,13 @@ def install_stop_hooks(target_dir):
             node = node.setdefault(key, {}) if isinstance(node, dict) else None
         entries = node.setdefault(keys[-1], []) if isinstance(node, dict) else None
         if not isinstance(entries, list):
-            print("  ⚠️ {0} has an unexpected layout; add `{1}` as a stop hook by hand.".format(rel, HOOK_COMMAND))
+            print("  ⚠️ {0} has an unexpected layout; add `{1}` under {2} by hand.".format(rel, command, keys[-1]))
             continue
-        if HOOK_COMMAND in json.dumps(entries):
+        if command in json.dumps(entries):
             continue
         entries.append(entry)
         write_json_config(path, data)
-        print("  + Stop hook: {0}".format(rel))
+        print("  + {0} hook: {1}".format(keys[-1], rel))
 
 def find_project_root(start):
     """Nearest directory at or above start that holds AGENTS.md; None when there is none."""
@@ -1035,6 +1046,81 @@ def cmd_verify(args):
         sys.exit(1)
     print("\n✅ AGENTS.md 里的测试与校验命令全部通过。")
 
+GIT_OPTIONS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
+
+def git_loss(words):
+    """What a single git call throws away, in plain Chinese; None when it keeps the work."""
+    words = list(words)
+    while words and "=" in words[0]:
+        words.pop(0)
+    if not words or os.path.basename(words[0]).lower() not in ("git", "git.exe"):
+        return None
+    rest = words[1:]
+    while rest and rest[0].startswith("-"):
+        rest = rest[2:] if rest[0] in GIT_OPTIONS_WITH_VALUE else rest[1:]
+    if not rest:
+        return None
+    sub, args = rest[0], rest[1:]
+    longs = {a.split("=")[0] for a in args if a.startswith("--")}
+    shorts = "".join(a[1:] for a in args if a.startswith("-") and not a.startswith("--"))
+    force = "--force" in longs or "f" in shorts
+    if sub == "reset" and "--hard" in longs:
+        return "会丢掉所有还没提交的改动"
+    if (sub == "checkout" and ("--" in args or "." in args or force)) or \
+            (sub == "restore" and ("--worktree" in longs or "W" in shorts or not ("--staged" in longs or "S" in shorts))):
+        return "会把文件恢复成上次提交的样子，丢掉还没提交的改动"
+    if sub == "clean" and force:
+        return "会删除还没被 git 记录的新文件"
+    if sub == "push" and (force or "--force-with-lease" in longs or any(a.startswith("+") for a in args)):
+        return "会用本地版本覆盖远程仓库，远程上本地没有的提交会丢失"
+    if sub == "branch" and ("D" in shorts or (("--delete" in longs or "d" in shorts) and force)):
+        return "会删除分支，分支上还没合并的提交会丢失"
+    if sub == "stash" and args[:1] in (["drop"], ["clear"]):
+        return "会删除用 git stash 暂存的改动"
+    return None
+
+def git_danger(command):
+    """(what it throws away, the git call) for the first git call in a shell command line that discards work; None when every call keeps it."""
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        tokens = command.split()
+    segment = []
+    for token in tokens + [";"]:
+        if token and all(ch in "();<>|&" for ch in token):
+            loss = git_loss(segment)
+            if loss:
+                return loss, " ".join(segment)
+            segment = []
+        else:
+            segment.append(token)
+    return None
+
+def guard_hook_response(event):
+    """Pre-command hook reply in the calling IDE's format: a git command that throws away work waits for the developer."""
+    tool_input = event.get("tool_input")
+    claude = "tool_input" in event
+    command = tool_input.get("command") if isinstance(tool_input, dict) else event.get("command")
+    danger = git_danger(command) if isinstance(command, str) else None
+    if danger is None:
+        return {}
+    loss, call = danger
+    message = "这条命令{0}：`{1}`。确定要执行就点 Run（Claude Code 里选 Yes）；想先留一份备份，就点 Skip（选 No），让 AI 先运行 `git stash`。".format(loss, call)
+    if claude:
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                       "permissionDecisionReason": message}}
+    return {"permission": "ask", "user_message": message,
+            "agent_message": "这条命令{0}，已交给开发者确认。开发者拒绝时，改用保留改动的做法（例如先 `git stash`），并用中文说明原因。".format(loss)}
+
+def cmd_guard():
+    try:
+        event = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        event = {}
+    print(json.dumps(guard_hook_response(event if isinstance(event, dict) else {}), ensure_ascii=False))
+
 def append_missing_lines(path, lines):
     existing = _read_text(path)
     missing = [line for line in lines if line not in existing]
@@ -1180,6 +1266,8 @@ def main():
         cmd_sync(target)
     elif subcmd == "verify":
         cmd_verify(args[1:])
+    elif subcmd == "guard":
+        cmd_guard()
     elif subcmd == "setup":
         cmd_setup()
     elif subcmd == "status":
