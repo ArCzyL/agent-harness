@@ -21,16 +21,9 @@
 在 Cursor、Claude Code、Antigravity 或 TRAE 里打开项目，把对应的那句话发给 AI，它会替你运行命令。
 
 - **安装或升级 agent-harness**：在终端运行[极速安装](#-极速安装30-秒搞定)里的那条命令（Mac 和 Windows 各一条）。升级就是再运行一次。
-- **给项目装上开发规范和自动校验**（新项目，或升级 agent-harness 之后的老项目）：
-  > 在项目根目录运行 `agent-harness init .`
-
-  每次升级 agent-harness 之后，每个老项目都再说一次，新功能才会装进这个项目；项目里已有的内容原样保留。
-- **测试命令需要特殊写法**（例如 Rust 项目编译时要加 `SQLX_OFFLINE=true`）：
-  > 把 AGENTS.md「测试与校验命令」里的命令改成带 `SQLX_OFFLINE=true` 的写法，并删掉包住这一段的 agent-harness 标记
-
-  删掉标记之后，`agent-harness sync` 会跳过这一段，改好的命令一直保留。
-- **打开 3D 知识图谱**：
-  > 运行 `agent-harness ui`
+- **给项目装上开发规范和自动校验**（新项目，或升级 agent-harness 之后的老项目）：发给 AI「在项目根目录运行 `agent-harness init .`」。每次升级 agent-harness 之后，每个老项目都再说一次，新功能才会装进这个项目；项目里已有的内容原样保留。
+- **测试命令需要特殊写法**（例如 Rust 项目编译时要加 `SQLX_OFFLINE=true`）：发给 AI「把 AGENTS.md 测试与校验命令里的命令改成带 `SQLX_OFFLINE=true` 的写法，并删掉包住这一段的 agent-harness 标记」。删掉标记之后，`agent-harness sync` 会跳过这一段，改好的命令一直保留。
+- **打开 3D 知识图谱**：发给 AI「运行 `agent-harness ui`」。
 
 ---
 
@@ -61,8 +54,7 @@
 * 📝 **长会话不走样的规则写法**：
   生成的 `AGENTS.md` 全部用肯定句写成「做什么、怎么做」，只写正确做法，并要求 AI 也这样写文档、注释和会话总结；你在对话中提出的长期要求，AI 会当轮写进 `AGENTS.md`。长会话压缩上下文后，AI 读到的仍是完整、正确的规则。
 * 🔒 **物理测试闭环（Test Harness Loop）**：
-  自动嗅探项目技术栈（Go、Rust、TypeScript/Node、Python）。根目录没有某个技术栈的清单文件时，向下两层识别子项目，生成在子项目目录里执行的命令（如 `cd web && pnpm test`）。测试命令来自仓库里已经存在的脚本和配置：`scripts.test`、`scripts.lint`、`tsconfig.json`、pytest / ruff 配置、`Cargo.toml`、`go.mod`。`init` 还会为 Cursor、Claude Code、Antigravity 装好 stop hook：每轮回复结束时，若文件自上次检查后有变化（提交也算；只问问题的一轮立即结束），`agent-harness verify` 在 270 秒内执行这些命令，失败或超时都把原因发回给智能体继续修改（最多 3 轮）。闭环如下：  
-  $$\text{编写/修改代码} \longrightarrow \text{运行测试命令} \longrightarrow \text{根据报错自行修复} \longrightarrow \text{全部绿灯通过} \longrightarrow \text{交付开发者}$$
+  自动嗅探项目技术栈（Go、Rust、TypeScript/Node、Python）。根目录没有某个技术栈的清单文件时，向下两层识别子项目，生成在子项目目录里执行的命令（如 `cd web && pnpm test`）。测试命令来自仓库里已经存在的脚本和配置：`scripts.test`、`scripts.lint`、`tsconfig.json`、pytest / ruff 配置、`Cargo.toml`、`go.mod`。`init` 还会为 Cursor、Claude Code、Antigravity 装好 stop hook：每轮回复结束时，若文件自上次检查后有变化（提交也算；只问问题的一轮立即结束），`agent-harness verify` 在 270 秒内执行这些命令，失败或超时都把原因发回给智能体继续修改（最多 3 轮）。闭环如下：编写/修改代码 → 运行测试命令 → 根据报错自行修复 → 全部绿灯通过 → 交付开发者。
 * 🌐 **100% 跨开发工具（IDE-Agnostic）**：
   MCP 配置写入 **TRAE、Cursor、Claude Code、Antigravity、Windsurf**。**Zed** 与 **VS Code** 直接读取仓库里的 `AGENTS.md`，`setup` 不为这两家写 MCP 文件。规则以 `AGENTS.md` 为唯一事实源，并自动生成只含一行 `@AGENTS.md` 引用的 `CLAUDE.md`、`GEMINI.md`（不用软链接，避免同时读取多个规则文件的工具重复加载）。
 * 🛡️ **私有仓库零泄露保护**：
