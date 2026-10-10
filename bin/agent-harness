@@ -56,6 +56,7 @@ def print_help():
     print("  agent-harness sync [path]    Refresh marker-managed facts in AGENTS.md (keeps custom rules)")
     print("  agent-harness verify [path]  Run the test commands listed in AGENTS.md (stop hooks add --hook)")
     print("  agent-harness guard          Ask before git commands that discard work (IDE pre-command hooks call it)")
+    print("  agent-harness graph [path]   Rebuild the project's knowledge graph (stop hooks do it after a commit)")
     print("  agent-harness setup          Pre-configure MCP for all supported AI IDEs (installed or not)")
     print("  agent-harness status         Show codebase memory daemon & indexed projects status")
     print("  agent-harness ui             Open the 3D Knowledge Graph UI in browser (localhost:9749)")
@@ -425,6 +426,7 @@ GRAPH_RULES_SECTION = """## 4. 代码知识图谱检索纪律 (Codebase Memory)
     - `trace_path`: 追踪上下游完整调用链，评估修改带来的“爆炸半径”；
     - `get_code_snippet`: 精确读取目标源码，让上下文只装必要内容。
 - **若工具不可用**（未安装或未配置 MCP），直接改用常规的文件搜索与读取，照常推进任务。
+- **刷新图谱**：开发者说「刷新图谱」时，运行 `agent-harness graph`。有新提交的那轮回复结束时，钩子会自动重建图谱。
 """
 
 def format_entry_points_md(entry_points):
@@ -614,6 +616,21 @@ def compose_supplement(existing, languages_str, entry_points_md, harness_md, kar
     )
     return existing.rstrip() + intro + "\n\n".join(chunks) + "\n"
 
+def index_graph(target_dir):
+    """Rebuild the knowledge graph of target_dir; returns one line saying how it went."""
+    idx_res = run_cbm_cli("index_repository", {"repo_path": target_dir})
+    if isinstance(idx_res, dict) and "nodes" in idx_res:
+        return f"✅ Graph indexed: {idx_res['nodes']} nodes, {idx_res.get('edges', 0)} edges."
+    if not os.path.exists(CBM_BIN):
+        return "ℹ️ Graph indexing skipped (codebase-memory-mcp not installed)."
+    return ("⚠️ codebase-memory-mcp gave no usable result — the engine failed to start, timed out, or changed its "
+            "output format. AGENTS.md is unaffected; update agent-harness or run with DEBUG=1 for details.")
+
+def cmd_graph(target):
+    root = find_project_root(target) or os.path.abspath(target)
+    print("⏳ Rebuilding the knowledge graph of {0}...".format(root))
+    print(index_graph(root))
+
 def cmd_init(target_dir):
     target_dir = os.path.abspath(target_dir)
     if not os.path.isdir(target_dir):
@@ -628,14 +645,7 @@ def cmd_init(target_dir):
 
     # Step 1: Index repository
     print("⏳ Building / updating codebase knowledge graph via codebase-memory-mcp...")
-    idx_res = run_cbm_cli("index_repository", {"repo_path": target_dir})
-    if isinstance(idx_res, dict) and "nodes" in idx_res:
-        print(f"✅ Graph indexed: {idx_res['nodes']} nodes, {idx_res.get('edges', 0)} edges.")
-    elif not os.path.exists(CBM_BIN):
-        print("ℹ️ Graph indexing skipped (codebase-memory-mcp not installed).")
-    else:
-        print("⚠️ codebase-memory-mcp gave no usable result — the engine failed to start, timed out, or changed its "
-              "output format. AGENTS.md is unaffected; update agent-harness or run with DEBUG=1 for details.")
+    print(index_graph(target_dir))
 
     print("🔍 Detecting languages, entry points & test commands...")
     languages_str, entry_points = parse_architecture(target_dir)
@@ -955,7 +965,7 @@ def run_harness_commands(root, echo=False, budget=None):
     return None
 
 def tree_fingerprint(root):
-    """(dirty, digest) of HEAD, git status, and the size and mtime of each changed file; None outside a git repo."""
+    """(dirty, digest, HEAD); digest covers HEAD, git status, and the size and mtime of each changed file. None outside a git repo."""
     status = run_cmd(["git", "-C", root, "status", "--porcelain", "-z", "--untracked-files=all"])
     if status.returncode != 0:
         return None
@@ -967,17 +977,17 @@ def tree_fingerprint(root):
         except OSError:
             continue
         digest.update("{0}\0{1}\0{2}\0".format(entry, info.st_size, info.st_mtime_ns).encode("utf-8"))
-    return bool(status.stdout), digest.hexdigest()
+    return bool(status.stdout), digest.hexdigest(), head.strip()
 
 def _load_verify_state():
-    """{"trees": {root: fingerprint seen last}, "rounds": {root|conversation: failing rounds in a row}}"""
+    """{"trees": {root: fingerprint seen last}, "heads": {root: HEAD seen last}, "rounds": {root|conversation: failing rounds in a row}}"""
     try:
         with open(VERIFY_STATE_FILE, "r", encoding="utf-8") as f:
             state = json.load(f)
     except (OSError, ValueError):
         state = {}
     state = state if isinstance(state, dict) else {}
-    for key in ("trees", "rounds"):
+    for key in ("trees", "heads", "rounds"):
         if not isinstance(state.get(key), dict):
             state[key] = {}
     return state
@@ -992,7 +1002,7 @@ def verify_hook_response(root, event):
     tree = tree_fingerprint(root) if root else None
     if tree is None:
         return {}
-    dirty, digest = tree
+    dirty, digest, head = tree
     state = _load_verify_state()
     last = state["trees"].get(root)
     failure = None
@@ -1001,6 +1011,10 @@ def verify_hook_response(root, event):
         # The commands may leave files of their own; the next turn compares against the tree they left
         digest = (tree_fingerprint(root) or tree)[1]
     state["trees"][root] = digest
+    # A commit this turn makes the graph stale; the first look leaves it to the graph init built
+    if state["heads"].get(root, head) != head:
+        index_graph(root)
+    state["heads"][root] = head
     antigravity = "terminationReason" in event
     claude = "stop_hook_active" in event
     rounds = 0
@@ -1268,6 +1282,8 @@ def main():
         cmd_verify(args[1:])
     elif subcmd == "guard":
         cmd_guard()
+    elif subcmd == "graph":
+        cmd_graph(target)
     elif subcmd == "setup":
         cmd_setup()
     elif subcmd == "status":

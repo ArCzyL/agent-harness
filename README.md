@@ -21,7 +21,9 @@
 在 Cursor、Claude Code、Antigravity 或 TRAE 里打开项目，把对应的那句话发给 AI，它会替你运行命令。
 
 - **安装或升级 agent-harness**：在终端运行[极速安装](#-极速安装30-秒搞定)里的那条命令（Mac 和 Windows 各一条）。升级就是再运行一次。
-- **给项目装上开发规范和自动校验**（新项目，或升级 agent-harness 之后的老项目）：发给 AI「在项目根目录运行 `agent-harness init .`」。每次升级 agent-harness 之后，每个老项目都再说一次，新功能才会装进这个项目；项目里已有的内容原样保留。
+- **开始一个全新项目**：新建一个空文件夹并用 AI 工具打开，发给 AI「在项目根目录运行 `git init`，再运行 `agent-harness init .`」（每轮自动校验靠 git 判断文件有没有改过，所以先 `git init`）。然后说出你想做什么，并加一句「带上测试」。AI 写出第一版代码和测试后，发给 AI「运行 `agent-harness sync`，再运行 `agent-harness check`」，把真实的技术栈和测试命令填进 `AGENTS.md`。
+- **给老项目装上开发规范和自动校验**（或升级 agent-harness 之后）：发给 AI「在项目根目录运行 `agent-harness init .`」。每次升级 agent-harness 之后，每个老项目都再说一次，新功能才会装进这个项目；项目里已有的内容原样保留。
+- **刷新知识图谱**：发给 AI「刷新图谱」，AI 会运行 `agent-harness graph`。AI 每次帮你提交代码后，那一轮回复结束时图谱会自动刷新；你自己在 Cursor 里点的提交，会在下一轮 AI 回复结束时刷新。
 - **测试命令需要特殊写法**（例如 Rust 项目编译时要加 `SQLX_OFFLINE=true`）：发给 AI「把 AGENTS.md 测试与校验命令里的命令改成带 `SQLX_OFFLINE=true` 的写法，并删掉包住这一段的 agent-harness 标记」。删掉标记之后，`agent-harness sync` 会跳过这一段，改好的命令一直保留。
 - **打开 3D 知识图谱**：发给 AI「运行 `agent-harness ui`」。
 - **看到「这条命令会丢掉……」的确认框**：AI 要运行会丢掉改动的 git 命令。想保留改动就点 Skip（Claude Code 里选 No），再发给 AI「先运行 `git stash` 备份，再继续」；确定这些改动都不要了才点 Run（选 Yes）。这类弹框每次单独点 Run，让每一次都经过你确认。
@@ -115,6 +117,7 @@ agent-harness check          # 技术栈、入口点、测试命令不一致则�
 agent-harness sync           # 只刷新 <!-- agent-harness:auto:* --> 托管字段，不动第 5 节业务红线
 agent-harness verify         # 按顺序执行 AGENTS.md 里列出的测试与校验命令（stop hook 调用的就是它）
 agent-harness guard          # 执行命令前的钩子调用它：会丢掉改动的 git 命令交给你确认
+agent-harness graph          # 重建本项目的知识图谱（有新提交时 stop hook 也会自动做）
 ```
 
 `check` 要求每个识别出的技术栈在 `AGENTS.md` 里有一条测试命令，等价写法都算（`pytest` 可替代 `unittest`，`pnpm run test` 可替代 `npm test` 等）；lint 和类型检查由你决定写不写。文档检查只看说明性文档：下载链接、`CHANGELOG` / ADR 文件、测试文件（`tests/`、`*_test.go`、`*.test.ts` 等）不参与比对；`git commit` 时只核对暂存区的改动。要手动改某个带标记的字段（例如测试命令要加环境变量）时，先删掉包住它的那对标记，之后 `sync` 跳过这一段。

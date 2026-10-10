@@ -667,6 +667,10 @@ class TestDocAlignment(unittest.TestCase):
             content = f.read()
         self.assertIn("若工具不可用", content)
         self.assertNotIn("严禁直接全文盲目 grep", content)
+        with open(os.path.join(SCRIPT_DIR, "..", "AGENTS.md"), "r", encoding="utf-8") as f:
+            repo_rules = f.read()
+        for text in [content, repo_rules]:
+            self.assertIn("开发者说「刷新图谱」时，运行 `agent-harness graph`", text)
 
     def test_check_language_needs_whole_word(self):
         with open(os.path.join(self.test_dir, "main.go"), "w") as f:
@@ -927,6 +931,19 @@ class TestCommandLine(unittest.TestCase):
             ah.main()
         self.assertTrue(os.path.isfile(os.path.join(self.test_dir, "AGENTS.md")))
 
+    def test_graph_command_rebuilds_the_project_graph(self):
+        calls = []
+        write(self.test_dir, "AGENTS.md", "# demo\n")
+        sub = os.path.join(self.test_dir, "src")
+        os.makedirs(sub)
+        out = io.StringIO()
+        with mock.patch.object(ah, "run_cbm_cli", lambda tool, params=None: calls.append((tool, params)) or
+                               {"nodes": 352, "edges": 1077}), \
+                mock.patch.object(sys, "argv", ["agent-harness", "graph", sub]), contextlib.redirect_stdout(out):
+            ah.main()
+        self.assertEqual(calls, [("index_repository", {"repo_path": os.path.abspath(self.test_dir)})])
+        self.assertIn("352 nodes, 1077 edges", out.getvalue())
+
     def test_main_writes_utf8_when_the_console_code_page_lacks_emoji(self):
         # Windows pipes default to the ANSI code page (cp1252 / cp936), which has no ✅ or ❌
         raw = io.BytesIO()
@@ -1036,9 +1053,12 @@ class TestVerify(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.test_dir, True)
-        patcher = mock.patch.object(ah, "VERIFY_STATE_FILE", os.path.join(self.test_dir, "state.json"))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.indexed = []
+        for name, value in [("VERIFY_STATE_FILE", os.path.join(self.test_dir, "state.json")),
+                            ("run_cbm_cli", lambda tool, params=None: self.indexed.append((tool, params)) or {"nodes": 1})]:
+            patcher = mock.patch.object(ah, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def agents(self, command):
         write(self.test_dir, "AGENTS.md",
@@ -1095,6 +1115,18 @@ class TestVerify(unittest.TestCase):
         write(self.test_dir, "a.py", "x = 22\n")
         self.assertTrue(ran({"status": "completed"}), "the same file edited again")
         self.assertTrue(ran({"status": "completed"}, status="", head="def"), "the changes were committed this turn")
+
+    def test_a_new_commit_refreshes_the_graph_once(self):
+        self.agents("echo ok")
+        reindex = ("index_repository", {"repo_path": self.test_dir})
+        self.assertEqual(self.respond({"status": "completed"}, head="a"), {})
+        self.assertEqual(self.indexed, [], "first look: init already built the graph")
+        self.respond({"status": "completed"}, status=" M b.py\0", head="a")
+        self.assertEqual(self.indexed, [], "edits without a commit")
+        self.assertEqual(self.respond({"status": "completed"}, status="", head="b"), {})
+        self.assertEqual(self.indexed, [reindex])
+        self.respond({"status": "completed"}, status="", head="b")
+        self.assertEqual(self.indexed, [reindex], "question-only turn after the commit")
 
     def test_claude_code_stops_asking_after_three_rounds(self):
         self.agents(self.FAILING)

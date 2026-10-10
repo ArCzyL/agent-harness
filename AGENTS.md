@@ -18,7 +18,7 @@
 - `bin/agent-harness`
 <!-- /agent-harness:auto:entries -->
 
-- **CLI 子命令**：`init` · `check` · `sync` · `verify` · `guard` · `setup` · `status` · `ui`
+- **CLI 子命令**：`init` · `check` · `sync` · `verify` · `guard` · `graph` · `setup` · `status` · `ui`
 
 ***
 
@@ -79,7 +79,7 @@
 
 - **文档与代码对齐检查**：`python3 bin/agent-harness check`
 
-- **自动执行**：以上三条命令写在 `.githooks/pre-commit` 和 `.github/workflows/test.yml`（改动时三处同步；CI 在 Ubuntu / Windows / macOS 上用 Python 3.9 运行它们）。Cursor（`.cursor/hooks.json`）和 Antigravity（`.agents/hooks.json`）每轮回复结束时运行本仓库的 `python3 bin/agent-harness verify --hook`：文件自上次检查后有变化时，按顺序执行上面三条命令；任一条失败（例如技术栈、入口点、测试命令不一致，或实现文件已改而引用该路径的说明没有一起改），或 270 秒内没有跑完，钩子都把终端输出发回给智能体继续修改（最多 3 轮）。Cursor 执行含 `git` 的命令前还会运行本仓库的 `python3 bin/agent-harness guard`，会丢掉改动的 git 命令先弹框等开发者确认。`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
+- **自动执行**：以上三条命令写在 `.githooks/pre-commit` 和 `.github/workflows/test.yml`（改动时三处同步；CI 在 Ubuntu / Windows / macOS 上用 Python 3.9 运行它们）。Cursor（`.cursor/hooks.json`）和 Antigravity（`.agents/hooks.json`）每轮回复结束时运行本仓库的 `python3 bin/agent-harness verify --hook`：文件自上次检查后有变化时，按顺序执行上面三条命令；任一条失败（例如技术栈、入口点、测试命令不一致，或实现文件已改而引用该路径的说明没有一起改），或 270 秒内没有跑完，钩子都把终端输出发回给智能体继续修改（最多 3 轮）；这一轮有新提交时，钩子还会重建本项目的知识图谱。Cursor 执行含 `git` 的命令前还会运行本仓库的 `python3 bin/agent-harness guard`，会丢掉改动的 git 命令先弹框等开发者确认。`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
 
 ### 文档与代码对齐（防下一会话漂移）
 
@@ -111,6 +111,8 @@
     - `get_code_snippet`: 精确读取目标源码，让上下文只装必要内容。
 
 - **若工具不可用**（未安装或未配置 MCP），直接改用常规的文件搜索与读取，照常推进任务。
+
+- **刷新图谱**：开发者说「刷新图谱」时，运行 `agent-harness graph`。有新提交的那轮回复结束时，钩子会自动重建图谱。
 
 ***
 
