@@ -13,6 +13,12 @@
         "command": "python3 bin/agent-harness guard",
         "matcher": "git"
       }
+    ],
+    "preToolUse": [
+      {
+        "command": "python3 bin/agent-harness guard",
+        "matcher": "index_repository"
+      }
     ]
   }
 }

@@ -624,6 +624,26 @@ class TestInitExecutionAndSafety(unittest.TestCase):
             cmd[:4] == ["git", "config", "--global", "core.excludesfile"] for cmd in calls
         ))
 
+    def test_setup_installs_global_guard_hooks_once(self):
+        home = os.path.join(self.test_dir, "home")
+        os.makedirs(home)
+        with mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home, "APPDATA": os.path.join(home, "AppData")}):
+            with mock.patch.object(ah, "safe_inject_mcp", lambda *args, **kwargs: None), \
+                    mock.patch.object(ah, "configure_global_git_excludes", lambda: None):
+                ah.cmd_setup()
+                ah.cmd_setup()
+        cursor = json.load(open(os.path.join(home, ".cursor", "hooks.json"), encoding="utf-8"))
+        self.assertEqual(cursor["hooks"]["beforeShellExecution"],
+                         [{"command": "agent-harness guard", "matcher": "git"}])
+        self.assertEqual(cursor["hooks"]["preToolUse"],
+                         [{"command": "agent-harness guard", "matcher": "index_repository"}])
+        claude = json.load(open(os.path.join(home, ".claude", "settings.json"), encoding="utf-8"))
+        self.assertEqual(claude["hooks"]["PreToolUse"],
+                         [{"matcher": "Bash", "hooks": [{"type": "command", "command": "agent-harness guard"}]},
+                          {"matcher": "mcp__.*index_repository",
+                           "hooks": [{"type": "command", "command": "agent-harness guard"}]}])
+        self.assertFalse(os.path.exists(os.path.join(home, ".gemini", "config", "hooks.json")))
+
     def test_init_still_writes_agents_md_when_the_engine_cannot_run(self):
         engine_dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, engine_dir, True)
@@ -703,6 +723,8 @@ class TestDocAlignment(unittest.TestCase):
         for text in [content, repo_rules]:
             self.assertIn("开发者说「刷新图谱」时，运行 `agent-harness graph`", text)
             self.assertIn("文件夹名作为项目名", text)
+            self.assertIn("index_repository", text)
+            self.assertIn("用户级钩子", text)
 
     def test_check_language_needs_whole_word(self):
         with open(os.path.join(self.test_dir, "main.go"), "w") as f:
@@ -1051,8 +1073,12 @@ class TestStopHooks(unittest.TestCase):
         ah.cmd_init(self.test_dir)
         self.assertEqual(self.read_json(".cursor/hooks.json")["hooks"]["beforeShellExecution"],
                          [{"command": "agent-harness guard", "matcher": "git"}])
+        self.assertEqual(self.read_json(".cursor/hooks.json")["hooks"]["preToolUse"],
+                         [{"command": "agent-harness guard", "matcher": "index_repository"}])
         self.assertEqual(self.read_json(".claude/settings.json")["hooks"]["PreToolUse"],
-                         [{"matcher": "Bash", "hooks": [{"type": "command", "command": "agent-harness guard"}]}])
+                         [{"matcher": "Bash", "hooks": [{"type": "command", "command": "agent-harness guard"}]},
+                          {"matcher": "mcp__.*index_repository",
+                           "hooks": [{"type": "command", "command": "agent-harness guard"}]}])
         # A failing Antigravity pre-tool hook blocks every command, so Antigravity gets the stop hook only
         self.assertNotIn("guard", json.dumps(self.read_json(".agents/hooks.json")))
 
@@ -1276,6 +1302,33 @@ class TestGuard(unittest.TestCase):
         for event in [{"command": "git status"}, {"tool_input": {"command": "ls"}}, {"tool_input": "odd"}, {}]:
             self.assertEqual(ah.guard_hook_response(event), {}, event)
 
+    def test_index_repository_without_a_name_gets_the_folder_name(self):
+        repo = "/Users/rex/资料/projects/Odzke"
+        cursor = ah.guard_hook_response({
+            "hook_event_name": "preToolUse",
+            "tool_name": "MCP: codebase-memory-mcp-index_repository",
+            "tool_input": {"repo_path": repo, "mode": "full"},
+        })
+        self.assertEqual(cursor["updated_input"], {"repo_path": repo, "mode": "full", "name": "Odzke"})
+        claude = ah.guard_hook_response({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "mcp__codebase-memory-mcp__index_repository",
+            "tool_input": {"repo_path": repo},
+        })
+        self.assertEqual(claude["hookSpecificOutput"]["updatedInput"], {"repo_path": repo, "name": "Odzke"})
+        already = ah.guard_hook_response({
+            "hook_event_name": "preToolUse",
+            "tool_name": "MCP: codebase-memory-mcp-index_repository",
+            "tool_input": {"repo_path": repo, "name": "Odzke"},
+        })
+        self.assertEqual(already, {})
+        encoded = ah.guard_hook_response({
+            "hook_event_name": "preToolUse",
+            "tool_name": "MCP: codebase-memory-mcp-index_repository",
+            "tool_input": {"repo_path": repo, "name": "Users-rex-e8b584e69699-projects-Odzke"},
+        })
+        self.assertEqual(encoded["updated_input"]["name"], "Odzke")
+
     def test_guard_command_reads_the_event_from_stdin(self):
         script = os.path.join(BIN_DIR, "agent-harness")
         for stdin, expected in [(json.dumps({"command": "git push --force"}), "ask"), ("not json", None), ("", None)]:
@@ -1288,6 +1341,9 @@ class TestGuard(unittest.TestCase):
         with open(os.path.join(SCRIPT_DIR, "..", ".cursor", "hooks.json"), "r", encoding="utf-8") as f:
             entries = json.load(f)["hooks"]["beforeShellExecution"]
         self.assertEqual(entries, [{"command": "python3 bin/agent-harness guard", "matcher": "git"}])
+        with open(os.path.join(SCRIPT_DIR, "..", ".cursor", "hooks.json"), "r", encoding="utf-8") as f:
+            mcp = json.load(f)["hooks"]["preToolUse"]
+        self.assertEqual(mcp, [{"command": "python3 bin/agent-harness guard", "matcher": "index_repository"}])
 
 
 @unittest.skipIf(sys.platform == "win32", "runs install.sh with bash")

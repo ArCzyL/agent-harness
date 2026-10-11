@@ -23,7 +23,7 @@
 - **安装或升级 agent-harness**：在终端运行[极速安装](#-极速安装30-秒搞定)里的那条命令（Mac 和 Windows 各一条）。升级就是再运行一次。
 - **开始一个全新项目**：新建一个空文件夹并用 AI 工具打开，发给 AI「在项目根目录运行 `git init`，再运行 `agent-harness init .`」（每轮自动校验靠 git 判断文件有没有改过，所以先 `git init`）。然后说出你想做什么，并加一句「带上测试」。AI 写出第一版代码和测试后，发给 AI「运行 `agent-harness sync`，再运行 `agent-harness check`」，把真实的技术栈和测试命令填进 `AGENTS.md`。
 - **给老项目装上开发规范和自动校验**（或升级 agent-harness 之后）：发给 AI「在项目根目录运行 `agent-harness init .`」。每次升级 agent-harness 之后，每个老项目都再说一次，新功能才会装进这个项目；项目里已有的内容原样保留。
-- **刷新知识图谱**：发给 AI「刷新图谱」，AI 会运行 `agent-harness graph`。AI 每次帮你提交代码后，那一轮回复结束时图谱会自动刷新；你自己在 Cursor 里点的提交，会在下一轮 AI 回复结束时刷新。
+- **刷新知识图谱**：发给 AI「刷新图谱」。升级过 agent-harness 之后，任何项目都可以说这句话（没有 `AGENTS.md` 也行），统计页用文件夹名（例如 `Odzke`）。AI 每次帮你提交代码后，那一轮回复结束时图谱会自动刷新；你自己在 Cursor 里点的提交，会在下一轮 AI 回复结束时刷新。
 - **测试命令需要特殊写法**（例如 Rust 项目编译时要加 `SQLX_OFFLINE=true`）：发给 AI「把 AGENTS.md 测试与校验命令里的命令改成带 `SQLX_OFFLINE=true` 的写法，并删掉包住这一段的 agent-harness 标记」。删掉标记之后，`agent-harness sync` 会跳过这一段，改好的命令一直保留。
 - **打开 3D 知识图谱**：发给 AI「运行 `agent-harness ui`」。
 - **看到「这条命令会丢掉……」的确认框**：AI 要运行会丢掉改动的 git 命令。想保留改动就点 Skip（Claude Code 里选 No），再发给 AI「先运行 `git stash` 备份，再继续」；确定这些改动都不要了才点 Run（选 Yes）。这类弹框每次单独点 Run，让每一次都经过你确认。
@@ -82,7 +82,7 @@ irm https://raw.githubusercontent.com/ArCzyL/agent-harness/main/install.ps1 | ie
 
 ### 安装脚本会自动完成：
 1. 自动下载**官方最新版** `codebase-memory-mcp` 并启动本地守护进程；已安装旧版时重跑安装脚本即可升级（升级后需在已打开的 AI 工具里重启一次该 MCP）；
-2. 为 TRAE、Cursor、Claude Code、Antigravity、Windsurf 写入全局 MCP 配置——尚未安装的工具也会预先写好，日后安装即可直接生效（损坏配置自动生成 `.bak` 备份）。每个文件先写进临时文件再整体替换，写到一半被打断时原文件保持完好。Zed 与 VS Code 读取仓库 `AGENTS.md`；
+2. 为 TRAE、Cursor、Claude Code、Antigravity、Windsurf 写入全局 MCP 配置——尚未安装的工具也会预先写好，日后安装即可直接生效（损坏配置自动生成 `.bak` 备份）。每个文件先写进临时文件再整体替换，写到一半被打断时原文件保持完好。Zed 与 VS Code 读取仓库 `AGENTS.md`。同时把 `agent-harness guard` 写入 Cursor 和 Claude Code 的用户级钩子：直接调用 MCP 建图时也会用文件夹名，不必每个旧项目再跑一次 `init`；
 3. 把图谱忽略规则追加到 Git 已经在用的全局 excludes 文件；还没有 `core.excludesfile` 时，才创建 `~/.gitignore_global` 并设为该路径；
 4. 将 `agent-harness` CLI 注册到 `~/.local/bin/`：`curl | bash` 时从 GitHub 下载 CLI 和规则模板，在克隆下来的仓库里运行 `bash install.sh` 时用仓库里的文件。
 
@@ -106,7 +106,7 @@ agent-harness init .
 2. **建图 + 事实推导**：为项目建立本地知识图谱供 AI 实时查询，统计页用文件夹名显示（例如 `Odzke`）；写入 `AGENTS.md` 的语言与入口点按文件系统规则推导，与 `check` / `sync` 用同一套规则，二者永不打架，也不依赖引擎是否安装；
 3. **定制化生成 `AGENTS.md`**：按仓库里已经存在的测试脚本和配置填入测试命令，并写入 Karpathy 四大纪律；
 4. **跨工具引用同步**：自动生成只含 `@AGENTS.md` 一行的 `CLAUDE.md` / `GEMINI.md`，规则只维护一份、只加载一次；旧版本生成的软链接（含 `.cursorrules`）会自动迁移。
-5. **安装钩子**：把 `agent-harness verify --hook` 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，把 `agent-harness guard` 合并进 `.cursor/hooks.json`（`beforeShellExecution`）和 `.claude/settings.json`（`PreToolUse`），原有条目全部保留（原文件解析失败先生成 `.bak` 备份）。把这些文件提交进仓库，协作者共享同一个闭环；没装 CLI 的机器上找不到该命令，任何操作都照常进行。
+5. **安装钩子**：把 `agent-harness verify --hook` 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，把 `agent-harness guard` 合并进 `.cursor/hooks.json`（`beforeShellExecution` 和 `preToolUse`）和 `.claude/settings.json`（`PreToolUse`：Bash 与 `index_repository`），原有条目全部保留（原文件解析失败先生成 `.bak` 备份）。把这些文件提交进仓库，协作者共享同一个闭环；没装 CLI 的机器上找不到该命令，任何操作都照常进行。
 
 ### 交付前必须对齐文档（防止下一会话幻觉）
 
@@ -116,7 +116,7 @@ agent-harness init .
 agent-harness check          # 技术栈、入口点、测试命令不一致则失败；引用了已改代码路径的说明没一起改也失败
 agent-harness sync           # 只刷新 <!-- agent-harness:auto:* --> 托管字段，不动第 5 节业务红线
 agent-harness verify         # 按顺序执行 AGENTS.md 里列出的测试与校验命令（stop hook 调用的就是它）
-agent-harness guard          # 执行命令前的钩子调用它：会丢掉改动的 git 命令交给你确认
+agent-harness guard          # 执行命令前的钩子调用它：会丢掉改动的 git 命令交给你确认；MCP 建图时补上文件夹名
 agent-harness graph          # 重建本项目的知识图谱（有新提交时 stop hook 也会自动做）
 ```
 

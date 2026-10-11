@@ -79,7 +79,7 @@
 
 - **文档与代码对齐检查**：`python3 bin/agent-harness check`
 
-- **自动执行**：以上三条命令写在 `.githooks/pre-commit` 和 `.github/workflows/test.yml`（改动时三处同步；CI 在 Ubuntu / Windows / macOS 上用 Python 3.9 运行它们）。Cursor（`.cursor/hooks.json`）和 Antigravity（`.agents/hooks.json`）每轮回复结束时运行本仓库的 `python3 bin/agent-harness verify --hook`：文件自上次检查后有变化时，按顺序执行上面三条命令；任一条失败（例如技术栈、入口点、测试命令不一致，或实现文件已改而引用该路径的说明没有一起改），或 270 秒内没有跑完，钩子都把终端输出发回给智能体继续修改（最多 3 轮）；这一轮有新提交时，钩子还会重建本项目的知识图谱。Cursor 执行含 `git` 的命令前还会运行本仓库的 `python3 bin/agent-harness guard`，会丢掉改动的 git 命令先弹框等开发者确认。`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
+- **自动执行**：以上三条命令写在 `.githooks/pre-commit` 和 `.github/workflows/test.yml`（改动时三处同步；CI 在 Ubuntu / Windows / macOS 上用 Python 3.9 运行它们）。Cursor（`.cursor/hooks.json`）和 Antigravity（`.agents/hooks.json`）每轮回复结束时运行本仓库的 `python3 bin/agent-harness verify --hook`：文件自上次检查后有变化时，按顺序执行上面三条命令；任一条失败（例如技术栈、入口点、测试命令不一致，或实现文件已改而引用该路径的说明没有一起改），或 270 秒内没有跑完，钩子都把终端输出发回给智能体继续修改（最多 3 轮）；这一轮有新提交时，钩子还会重建本项目的知识图谱。Cursor 执行含 `git` 的命令前、以及调用 `index_repository` 前，还会运行本仓库的 `python3 bin/agent-harness guard`：会丢掉改动的 git 命令先弹框等开发者确认；建图没带文件夹名时补上文件夹名。`git commit` 前也会运行（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。
 
 ### 文档与代码对齐（防下一会话漂移）
 
@@ -112,7 +112,7 @@
 
 - **若工具不可用**（未安装或未配置 MCP），直接改用常规的文件搜索与读取，照常推进任务。
 
-- **刷新图谱**：开发者说「刷新图谱」时，运行 `agent-harness graph`。有新提交的那轮回复结束时，钩子会自动重建图谱。建图时把文件夹名作为项目名传给引擎，统计页显示 `Odzke` 这样的目录名；同一路径下旧的路径编码名称会被删掉。
+- **刷新图谱**：开发者说「刷新图谱」时，运行 `agent-harness graph`。有新提交的那轮回复结束时，钩子会自动重建图谱。建图时把文件夹名作为项目名传给引擎，统计页显示 `Odzke` 这样的目录名；同一路径下旧的路径编码名称会被删掉。直接调用 MCP `index_repository` 时，本机用户级钩子也会补上文件夹名（没有 `AGENTS.md` 的项目同样生效）。
 
 ***
 
@@ -124,7 +124,7 @@
 
 - **零依赖 + Python 3.9**：`bin/agent-harness` 只用 Python 标准库与 Python 3.9 语法（分支用 `if/elif`，类型注解用 `typing.Optional` / `typing.Union`），确保能在 macOS 自带的 Python 3.9 上运行。文件第 2 行保留 `# -*- coding: utf-8 -*-`：Windows 上的 Python 3.9 直接运行脚本时，靠这一行才能读入较长的中文行。
 
-- **保留用户内容**：`init` 在 `AGENTS.md` 不存在时创建它；文件已存在时保留原文，只在末尾追加缺失的规范段落和 `<!-- agent-harness:auto:* -->` 标记，已经写全的文件保持不动；已有「测试与校验命令」段的文件沿用这一段作为命令清单。`sync` 只改标记内的内容；`init` 把 stop hook 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，把 `agent-harness guard` 合并进 `.cursor/hooks.json` 和 `.claude/settings.json`，保留原有条目且每个钩子只添加一次；`init` 与 `setup` 改写 IDE 配置时先写临时文件再整体替换，原文件解析失败先生成 `.bak` 备份。已有 `core.excludesfile` 时，把图谱忽略规则追加进该文件并保留原路径；还没有该配置时，才写入 `~/.gitignore_global` 并设为 excludes 文件。
+- **保留用户内容**：`init` 在 `AGENTS.md` 不存在时创建它；文件已存在时保留原文，只在末尾追加缺失的规范段落和 `<!-- agent-harness:auto:* -->` 标记，已经写全的文件保持不动；已有「测试与校验命令」段的文件沿用这一段作为命令清单。`sync` 只改标记内的内容；`init` 把 stop hook 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，把 `agent-harness guard` 合并进 `.cursor/hooks.json` 和 `.claude/settings.json`，保留原有条目且每个 matcher 只添加一次；`init` 与 `setup` 改写 IDE 配置时先写临时文件再整体替换，原文件解析失败先生成 `.bak` 备份。`setup` 还把 `agent-harness guard` 合并进 `~/.cursor/hooks.json` 和 `~/.claude/settings.json`，没有 `AGENTS.md` 的项目直接调用 MCP 建图时也用文件夹名。已有 `core.excludesfile` 时，把图谱忽略规则追加进该文件并保留原路径；还没有该配置时，才写入 `~/.gitignore_global` 并设为 excludes 文件。
 
 - **逻辑与说明同一改动**：改了逻辑或实现方法时，同一次改动里更新描述该行为的说明（README、`docs/`、`AGENTS.md` 的对应段落）。`agent-harness check` 在实现文件已改、且引用该路径的说明文档未出现在本次改动里时失败；智能体补上对应段落后再交付。
 

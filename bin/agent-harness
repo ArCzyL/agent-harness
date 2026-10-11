@@ -55,7 +55,7 @@ def print_help():
     print("  agent-harness check [path]   Verify stack, entries, test commands, and docs citing changed code")
     print("  agent-harness sync [path]    Refresh marker-managed facts in AGENTS.md (keeps custom rules)")
     print("  agent-harness verify [path]  Run the test commands listed in AGENTS.md (stop hooks add --hook)")
-    print("  agent-harness guard          Ask before git commands that discard work (IDE pre-command hooks call it)")
+    print("  agent-harness guard          Ask before git discards work; give index_repository the folder name")
     print("  agent-harness graph [path]   Rebuild the project's knowledge graph (stop hooks do it after a commit)")
     print("  agent-harness setup          Pre-configure MCP for all supported AI IDEs (installed or not)")
     print("  agent-harness status         Show codebase memory daemon & indexed projects status")
@@ -426,7 +426,7 @@ GRAPH_RULES_SECTION = """## 4. 代码知识图谱检索纪律 (Codebase Memory)
     - `trace_path`: 追踪上下游完整调用链，评估修改带来的“爆炸半径”；
     - `get_code_snippet`: 精确读取目标源码，让上下文只装必要内容。
 - **若工具不可用**（未安装或未配置 MCP），直接改用常规的文件搜索与读取，照常推进任务。
-- **刷新图谱**：开发者说「刷新图谱」时，运行 `agent-harness graph`。有新提交的那轮回复结束时，钩子会自动重建图谱。建图时把文件夹名作为项目名传给引擎，统计页显示 `Odzke` 这样的目录名；同一路径下旧的路径编码名称会被删掉。
+- **刷新图谱**：开发者说「刷新图谱」时，运行 `agent-harness graph`。有新提交的那轮回复结束时，钩子会自动重建图谱。建图时把文件夹名作为项目名传给引擎，统计页显示 `Odzke` 这样的目录名；同一路径下旧的路径编码名称会被删掉。直接调用 MCP `index_repository` 时，本机用户级钩子也会补上文件夹名（没有 `AGENTS.md` 的项目同样生效）。
 """
 
 def format_entry_points_md(entry_points):
@@ -903,31 +903,71 @@ HOOK_TARGETS = [
      {"type": "command", "command": HOOK_COMMAND, "timeout": HOOK_TIMEOUT}),
     (".cursor/hooks.json", {"version": 1}, ["hooks", "beforeShellExecution"], GUARD_COMMAND,
      {"command": GUARD_COMMAND, "matcher": "git"}),
+    (".cursor/hooks.json", {"version": 1}, ["hooks", "preToolUse"], GUARD_COMMAND,
+     {"command": GUARD_COMMAND, "matcher": "index_repository"}),
     (".claude/settings.json", {}, ["hooks", "PreToolUse"], GUARD_COMMAND,
      {"matcher": "Bash", "hooks": [{"type": "command", "command": GUARD_COMMAND}]}),
+    (".claude/settings.json", {}, ["hooks", "PreToolUse"], GUARD_COMMAND,
+     {"matcher": "mcp__.*index_repository",
+      "hooks": [{"type": "command", "command": GUARD_COMMAND}]}),
 ]
 VERIFY_STATE_FILE = os.path.join(tempfile.gettempdir(), "agent-harness-verify.json")
 COMMAND_LINE_RE = re.compile(r"^\s*[-*]\s+\*\*[^*]+\*\*\s*[：:]\s*`([^`]+)`\s*$")
 
+def hook_entry_present(entries, command, entry):
+    """True when this command is already installed for the same matcher (or with no matcher)."""
+    matcher = entry.get("matcher")
+    for existing in entries:
+        if command not in json.dumps(existing):
+            continue
+        if matcher is None or (isinstance(existing, dict) and existing.get("matcher") == matcher):
+            return True
+    return False
+
+def merge_hook_entry(path, defaults, keys, command, entry):
+    """Add entry under keys in the JSON object at path, keeping every existing item. True when a line was added."""
+    data = load_json_config(path)
+    for key, value in defaults.items():
+        data.setdefault(key, value)
+    node = data
+    for key in keys[:-1]:
+        node = node.setdefault(key, {}) if isinstance(node, dict) else None
+    entries = node.setdefault(keys[-1], []) if isinstance(node, dict) else None
+    if not isinstance(entries, list):
+        print("  ⚠️ {0} has an unexpected layout; add `{1}` under {2} by hand.".format(path, command, keys[-1]))
+        return False
+    if hook_entry_present(entries, command, entry):
+        return False
+    entries.append(entry)
+    write_json_config(path, data)
+    return True
+
 def install_hooks(target_dir):
-    """Add the verify stop hook and the git guard to each IDE's project config, keeping every existing entry."""
+    """Add the verify stop hook and the guard to each IDE's project config, keeping every existing entry."""
     for rel, defaults, keys, command, entry in HOOK_TARGETS:
         path = os.path.join(target_dir, *rel.split("/"))
-        data = load_json_config(path)
-        for key, value in defaults.items():
-            data.setdefault(key, value)
-        node = data
-        for key in keys[:-1]:
-            node = node.setdefault(key, {}) if isinstance(node, dict) else None
-        entries = node.setdefault(keys[-1], []) if isinstance(node, dict) else None
-        if not isinstance(entries, list):
-            print("  ⚠️ {0} has an unexpected layout; add `{1}` under {2} by hand.".format(rel, command, keys[-1]))
-            continue
-        if command in json.dumps(entries):
-            continue
-        entries.append(entry)
-        write_json_config(path, data)
-        print("  + {0} hook: {1}".format(keys[-1], rel))
+        if merge_hook_entry(path, defaults, keys, command, entry):
+            print("  + {0} hook: {1}".format(keys[-1], rel))
+
+def global_guard_hook_targets():
+    """Cursor and Claude Code user-level guard hooks. Antigravity is omitted (a failing pre-tool hook blocks every command)."""
+    return [
+        (os.path.expanduser("~/.cursor/hooks.json"), {"version": 1}, ["hooks", "beforeShellExecution"], GUARD_COMMAND,
+         {"command": GUARD_COMMAND, "matcher": "git"}),
+        (os.path.expanduser("~/.cursor/hooks.json"), {"version": 1}, ["hooks", "preToolUse"], GUARD_COMMAND,
+         {"command": GUARD_COMMAND, "matcher": "index_repository"}),
+        (os.path.expanduser("~/.claude/settings.json"), {}, ["hooks", "PreToolUse"], GUARD_COMMAND,
+         {"matcher": "Bash", "hooks": [{"type": "command", "command": GUARD_COMMAND}]}),
+        (os.path.expanduser("~/.claude/settings.json"), {}, ["hooks", "PreToolUse"], GUARD_COMMAND,
+         {"matcher": "mcp__.*index_repository",
+          "hooks": [{"type": "command", "command": GUARD_COMMAND}]}),
+    ]
+
+def install_global_guard_hooks():
+    """Merge the git and index_repository guards into the user's Cursor and Claude Code config."""
+    for path, defaults, keys, command, entry in global_guard_hook_targets():
+        if merge_hook_entry(path, defaults, keys, command, entry):
+            print("  + {0} hook: {1}".format(keys[-1], path))
 
 def find_project_root(start):
     """Nearest directory at or above start that holds AGENTS.md; None when there is none."""
@@ -1130,6 +1170,24 @@ def git_loss(words):
         return "会删除用 git stash 暂存的改动"
     return None
 
+def graph_name_update(event):
+    """tool_input with name set to the folder, or None when this is not an index_repository call that needs it."""
+    tool = str(event.get("tool_name") or event.get("toolName") or event.get("tool") or "")
+    if "index_repository" not in tool:
+        return None
+    original = event.get("tool_input")
+    if not isinstance(original, dict):
+        original = event.get("arguments")
+    if not isinstance(original, dict):
+        return None
+    repo = original.get("repo_path")
+    name = os.path.basename(os.path.abspath(repo)) if isinstance(repo, str) and repo else ""
+    if not name or original.get("name") == name:
+        return None
+    updated = dict(original)
+    updated["name"] = name
+    return updated
+
 def git_danger(command):
     """(what it throws away, the git call) for the first git call in a shell command line that discards work; None when every call keeps it."""
     try:
@@ -1150,7 +1208,12 @@ def git_danger(command):
     return None
 
 def guard_hook_response(event):
-    """Pre-command hook reply in the calling IDE's format: a git command that throws away work waits for the developer."""
+    """Pre-tool hook reply: fill index_repository name with the folder; ask before git discards work."""
+    updated = graph_name_update(event)
+    if updated is not None:
+        if event.get("hook_event_name") == "PreToolUse":
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": updated}}
+        return {"updated_input": updated}
     tool_input = event.get("tool_input")
     claude = "tool_input" in event
     command = tool_input.get("command") if isinstance(tool_input, dict) else event.get("command")
@@ -1248,6 +1311,8 @@ def cmd_setup():
         safe_inject_mcp(wp, "Windsurf")
 
     # Zed and VS Code read AGENTS.md from the repo; setup does not write an MCP file for them.
+    print("🔁 Installing user-level git and graph-name guards (Cursor, Claude Code)...")
+    install_global_guard_hooks()
     configure_global_git_excludes()
 
     print("\n✨ All supported AI development tools are configured and ready!\n")
