@@ -40,6 +40,11 @@ def write(base, rel, body, encoding="utf-8"):
     return path
 
 
+def graph_params(path):
+    path = os.path.abspath(path)
+    return {"repo_path": path, "name": os.path.basename(path)}
+
+
 class FakeRun(object):
     """Stands in for ah.run_cmd: answers by git subcommand and records each call."""
 
@@ -387,7 +392,33 @@ class TestInitExecutionAndSafety(unittest.TestCase):
         calls = []
         ah.run_cbm_cli = lambda tool, params=None: calls.append((tool, params)) or {"project": "p", "nodes": 1, "edges": 0}
         ah.cmd_init(self.test_dir)
-        self.assertEqual(calls[0], ("index_repository", {"repo_path": os.path.abspath(self.test_dir)}))
+        self.assertEqual(calls[0], ("index_repository", graph_params(self.test_dir)))
+
+    def test_index_graph_uses_the_folder_name_and_drops_the_path_encoded_copy(self):
+        root = os.path.join(self.test_dir, "资料", "projects", "Odzke")
+        os.makedirs(root)
+        calls = []
+
+        def fake(tool, params=None):
+            calls.append((tool, params))
+            if tool == "index_repository":
+                return {"project": "Odzke", "nodes": 3, "edges": 1}
+            if tool == "list_projects":
+                return {"projects": [
+                    {"name": "Odzke", "root_path": root},
+                    {"name": "Users-rex-e8b584e69699-projects-Odzke", "root_path": root},
+                    {"name": "TickArb", "root_path": "/other/TickArb"},
+                ]}
+            return {"status": "deleted"}
+
+        ah.run_cbm_cli = fake
+        line = ah.index_graph(root)
+        self.assertEqual(calls, [
+            ("index_repository", {"repo_path": os.path.abspath(root), "name": "Odzke"}),
+            ("list_projects", {"format": "json"}),
+            ("delete_project", {"project": "Users-rex-e8b584e69699-projects-Odzke"}),
+        ])
+        self.assertIn("3 nodes", line)
 
     def test_init_warns_loudly_on_unrecognized_engine_output(self):
         import io
@@ -671,6 +702,7 @@ class TestDocAlignment(unittest.TestCase):
             repo_rules = f.read()
         for text in [content, repo_rules]:
             self.assertIn("开发者说「刷新图谱」时，运行 `agent-harness graph`", text)
+            self.assertIn("文件夹名作为项目名", text)
 
     def test_check_language_needs_whole_word(self):
         with open(os.path.join(self.test_dir, "main.go"), "w") as f:
@@ -941,7 +973,7 @@ class TestCommandLine(unittest.TestCase):
                                {"nodes": 352, "edges": 1077}), \
                 mock.patch.object(sys, "argv", ["agent-harness", "graph", sub]), contextlib.redirect_stdout(out):
             ah.main()
-        self.assertEqual(calls, [("index_repository", {"repo_path": os.path.abspath(self.test_dir)})])
+        self.assertEqual(calls[0], ("index_repository", graph_params(self.test_dir)))
         self.assertIn("352 nodes, 1077 edges", out.getvalue())
 
     def test_main_writes_utf8_when_the_console_code_page_lacks_emoji(self):
@@ -1054,8 +1086,17 @@ class TestVerify(unittest.TestCase):
         self.test_dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.test_dir, True)
         self.indexed = []
+
+        def fake_cbm(tool, params=None):
+            if tool == "index_repository":
+                self.indexed.append((tool, params))
+                return {"nodes": 1}
+            if tool == "list_projects":
+                return {"projects": []}
+            return {}
+
         for name, value in [("VERIFY_STATE_FILE", os.path.join(self.test_dir, "state.json")),
-                            ("run_cbm_cli", lambda tool, params=None: self.indexed.append((tool, params)) or {"nodes": 1})]:
+                            ("run_cbm_cli", fake_cbm)]:
             patcher = mock.patch.object(ah, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -1118,7 +1159,7 @@ class TestVerify(unittest.TestCase):
 
     def test_a_new_commit_refreshes_the_graph_once(self):
         self.agents("echo ok")
-        reindex = ("index_repository", {"repo_path": self.test_dir})
+        reindex = ("index_repository", graph_params(self.test_dir))
         self.assertEqual(self.respond({"status": "completed"}, head="a"), {})
         self.assertEqual(self.indexed, [], "first look: init already built the graph")
         self.respond({"status": "completed"}, status=" M b.py\0", head="a")

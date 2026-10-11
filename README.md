@@ -103,7 +103,7 @@ agent-harness init .
 
 ### 智能体闭环流程：
 1. **防误覆盖保护**：已有 `AGENTS.md` 时原文保留。里面还没有 Karpathy 准则、测试命令、文档对齐或知识图谱检索纪律时，`init` 在末尾补上这些段落；已经写全的文件保持不动。已有手写的「测试与校验命令」段时，这一段就是项目唯一的命令清单。
-2. **建图 + 事实推导**：为项目建立本地知识图谱供 AI 实时查询；写入 `AGENTS.md` 的语言与入口点按文件系统规则推导，与 `check` / `sync` 用同一套规则，二者永不打架，也不依赖引擎是否安装；
+2. **建图 + 事实推导**：为项目建立本地知识图谱供 AI 实时查询，统计页用文件夹名显示（例如 `Odzke`）；写入 `AGENTS.md` 的语言与入口点按文件系统规则推导，与 `check` / `sync` 用同一套规则，二者永不打架，也不依赖引擎是否安装；
 3. **定制化生成 `AGENTS.md`**：按仓库里已经存在的测试脚本和配置填入测试命令，并写入 Karpathy 四大纪律；
 4. **跨工具引用同步**：自动生成只含 `@AGENTS.md` 一行的 `CLAUDE.md` / `GEMINI.md`，规则只维护一份、只加载一次；旧版本生成的软链接（含 `.cursorrules`）会自动迁移。
 5. **安装钩子**：把 `agent-harness verify --hook` 合并进 `.cursor/hooks.json`、`.claude/settings.json`、`.agents/hooks.json`，把 `agent-harness guard` 合并进 `.cursor/hooks.json`（`beforeShellExecution`）和 `.claude/settings.json`（`PreToolUse`），原有条目全部保留（原文件解析失败先生成 `.bak` 备份）。把这些文件提交进仓库，协作者共享同一个闭环；没装 CLI 的机器上找不到该命令，任何操作都照常进行。

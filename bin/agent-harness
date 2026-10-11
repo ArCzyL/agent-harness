@@ -426,7 +426,7 @@ GRAPH_RULES_SECTION = """## 4. 代码知识图谱检索纪律 (Codebase Memory)
     - `trace_path`: 追踪上下游完整调用链，评估修改带来的“爆炸半径”；
     - `get_code_snippet`: 精确读取目标源码，让上下文只装必要内容。
 - **若工具不可用**（未安装或未配置 MCP），直接改用常规的文件搜索与读取，照常推进任务。
-- **刷新图谱**：开发者说「刷新图谱」时，运行 `agent-harness graph`。有新提交的那轮回复结束时，钩子会自动重建图谱。
+- **刷新图谱**：开发者说「刷新图谱」时，运行 `agent-harness graph`。有新提交的那轮回复结束时，钩子会自动重建图谱。建图时把文件夹名作为项目名传给引擎，统计页显示 `Odzke` 这样的目录名；同一路径下旧的路径编码名称会被删掉。
 """
 
 def format_entry_points_md(entry_points):
@@ -616,10 +616,47 @@ def compose_supplement(existing, languages_str, entry_points_md, harness_md, kar
     )
     return existing.rstrip() + intro + "\n\n".join(chunks) + "\n"
 
+def graph_index_params(target_dir):
+    """Engine args: the folder name so the graph lists `Odzke`, not a path-encoded string."""
+    target_dir = os.path.abspath(target_dir)
+    params = {"repo_path": target_dir}
+    name = os.path.basename(target_dir)
+    if name:
+        params["name"] = name
+    return params
+
+def drop_stale_graph_names(target_dir, keep_name):
+    """Delete other graph names that still point at target_dir, left by path-encoded indexing."""
+    data = run_cbm_cli("list_projects", {"format": "json"})
+    projects = data.get("projects") if isinstance(data, dict) else None
+    if not isinstance(projects, list):
+        return
+    try:
+        want = os.path.realpath(target_dir)
+    except OSError:
+        want = os.path.abspath(target_dir)
+    for project in projects:
+        if not isinstance(project, dict):
+            continue
+        other = project.get("name") or ""
+        root = project.get("root_path") or ""
+        if not other or other == keep_name or not root:
+            continue
+        try:
+            same = os.path.realpath(root) == want
+        except OSError:
+            same = os.path.abspath(root) == os.path.abspath(target_dir)
+        if same:
+            run_cbm_cli("delete_project", {"project": other})
+
 def index_graph(target_dir):
     """Rebuild the knowledge graph of target_dir; returns one line saying how it went."""
-    idx_res = run_cbm_cli("index_repository", {"repo_path": target_dir})
+    params = graph_index_params(target_dir)
+    idx_res = run_cbm_cli("index_repository", params)
     if isinstance(idx_res, dict) and "nodes" in idx_res:
+        keep = params.get("name")
+        if keep:
+            drop_stale_graph_names(params["repo_path"], keep)
         return f"✅ Graph indexed: {idx_res['nodes']} nodes, {idx_res.get('edges', 0)} edges."
     if not os.path.exists(CBM_BIN):
         return "ℹ️ Graph indexing skipped (codebase-memory-mcp not installed)."
